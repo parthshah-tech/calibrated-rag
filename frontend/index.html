@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask your documents</title>
+<style>
+:root{--paper:#f4f6f8;--ink:#1c2733;--muted:#5b6876;--line:#d5dbe2;--low:#b4530a;--mid:#2c6a99;--high:#1d7a5a;--focus:#1c2733}
+@media (prefers-color-scheme:dark){:root{--paper:#161c23;--ink:#e6ebf0;--muted:#9aa7b4;--line:#2d3743;--low:#e08a3c;--mid:#6aa8d6;--high:#4fb88f;--focus:#e6ebf0}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:46rem;margin:0 auto;padding:2.5rem 1.25rem 4rem}
+h1{font:600 1.9rem/1.2 "Iowan Old Style","Palatino Linotype",Georgia,serif;margin:0 0 .35rem;letter-spacing:-.01em}
+.lede{color:var(--muted);margin:0 0 1.75rem;max-width:36rem}
+form{display:flex;gap:.5rem;flex-wrap:wrap}
+input[type=text]{flex:1 1 18rem;font:inherit;padding:.7rem .85rem;border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit}
+select,button{font:inherit;padding:.7rem .95rem;border:1px solid var(--line);border-radius:6px;background:transparent;color:inherit;cursor:pointer}
+button.go{background:var(--ink);color:var(--paper);border-color:var(--ink);font-weight:600}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.tools{display:flex;justify-content:space-between;align-items:center;margin:.6rem 0 0;color:var(--muted);font-size:.9rem;gap:1rem;flex-wrap:wrap}
+.linkish{border:0;padding:0;text-decoration:underline;color:var(--muted);font-size:inherit}
+#status{min-height:1.4rem}
+.verdict{margin:2rem 0 1.5rem;padding-left:1.1rem;border-left:5px solid var(--line)}
+.verdict.Low{border-color:var(--low)}.verdict.Medium{border-color:var(--mid)}.verdict.High{border-color:var(--high)}
+.verdict h2{font:600 1.7rem/1.2 "Iowan Old Style","Palatino Linotype",Georgia,serif;margin:0 0 .4rem}
+.gauge{display:flex;gap:5px;margin:.4rem 0 .7rem;max-width:18rem}
+.gauge i{flex:1;height:10px;border-radius:2px;background:var(--line)}
+.verdict.Low .gauge i:nth-child(1){background:var(--low)}
+.verdict.Medium .gauge i:nth-child(-n+2){background:var(--mid)}
+.verdict.High .gauge i{background:var(--high)}
+.verdict p{margin:.2rem 0;color:var(--muted);max-width:36rem}
+ol{list-style:none;margin:0;padding:0}
+li.hit{display:grid;grid-template-columns:2rem 1fr;padding:1.1rem 0;border-top:1px solid var(--line)}
+.rk{font:600 1.15rem/1.4 "Iowan Old Style","Palatino Linotype",Georgia,serif;color:var(--muted)}
+.src{display:flex;justify-content:space-between;gap:1rem;font-size:.88rem;color:var(--muted);margin-bottom:.35rem}
+.src b{color:var(--ink);font-weight:600;overflow-wrap:anywhere}
+.txt{font:1.02rem/1.65 "Iowan Old Style","Palatino Linotype",Georgia,serif;white-space:pre-wrap;overflow-wrap:anywhere;max-width:40rem}
+mark{background:transparent;color:inherit;font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
+.empty{color:var(--muted);padding:1.5rem 0}
+</style>
+</head>
+<body>
+<main>
+  <h1>Ask your documents</h1>
+  <p class="lede">Search what you have uploaded. Each answer shows its sources, and how much the keyword and meaning-based searches agree.</p>
+  <form id="f">
+    <input id="q" type="text" placeholder="What do you want to find?" aria-label="Question" autocomplete="off" required>
+    <select id="mode" aria-label="Search method">
+      <option value="hybrid">Hybrid</option><option value="dense">Meaning only</option><option value="bm25">Keywords only</option>
+    </select>
+    <button class="go" type="submit">Search</button>
+  </form>
+  <div class="tools">
+    <span id="status" role="status" aria-live="polite"></span>
+    <span><button class="linkish" type="button" id="add">Add a document</button>
+    <input id="file" type="file" accept=".txt,.md,.pdf,.docx" hidden></span>
+  </div>
+  <div id="out"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const MEANING = {
+  Low: ["Low confidence", "The two search methods disagree about what matches. Check the sources before relying on this."],
+  Medium: ["Medium confidence", "The search methods partly agree. The sources below are worth a quick read."],
+  High: ["High confidence", "Both search methods agree on the top sources."]
+};
+function tidy(text) {
+  // Display only: collapse table padding and drop bold markers; the stored text is unchanged.
+  return text.split("\n").map(l => (l.includes("|") ? l.replace(/[ \t]{2,}/g, " ") : l)).join("\n")
+    .replace(/\*\*/g, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+function highlight(text, query) {
+  const terms = (query.toLowerCase().match(/\w{3,}/g) || []).filter((t, i, a) => a.indexOf(t) === i);
+  let html = esc(tidy(text));
+  if (terms.length) html = html.replace(new RegExp("\\b(" + terms.join("|") + ")\\b", "gi"), "<mark>$1</mark>");
+  return html;
+}
+function verdict(c, mode) {
+  if (!c) return mode === "hybrid" ? "" : `<p class="empty">Confidence needs both search methods. Switch to Hybrid to see it.</p>`;
+  const [title, text] = MEANING[c.bucket];
+  return `<section class="verdict ${c.bucket}" aria-label="Retrieval confidence">
+    <h2>${title}</h2><div class="gauge" aria-hidden="true"><i></i><i></i><i></i></div>
+    <p>${text}</p>
+    <p>This reflects how well the search found sources, not whether an answer is correct. Agreement score ${c.score.toFixed(2)}. Cutoffs are provisional and not yet calibrated on these documents.</p></section>`;
+}
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) {
+    let detail = r.statusText;
+    try { const j = await r.json(); detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail); } catch (_) {}
+    throw new Error(detail);
+  }
+  return r.json();
+}
+$("f").addEventListener("submit", async e => {
+  e.preventDefault();
+  const query = $("q").value.trim(), mode = $("mode").value;
+  if (!query) return;
+  $("status").textContent = "Searching...";
+  try {
+    const d = await api("/search", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query, k: 5, mode})});
+    $("status").textContent = `${d.results.length} sources in ${Math.round(d.trace.total_ms)} ms`;
+    const items = d.results.map((r, i) => `<li class="hit"><span class="rk">${i + 1}</span><div><div class="src"><b>${esc(r.source)}</b><span>characters ${r.start} to ${r.end}</span></div>
+      <div class="txt">${highlight(r.text, query)}</div></div></li>`).join("");
+    $("out").innerHTML = verdict(d.confidence, mode) + (items ? `<ol>${items}</ol>` : `<p class="empty">No sources matched. Try different words, or add a document.</p>`);
+  } catch (err) {
+    $("status").textContent = "";
+    $("out").innerHTML = `<p class="empty">Search failed: ${esc(err.message)}. Check that the server is running and a document has been added.</p>`;
+  }
+});
+$("add").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", async () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  $("status").textContent = `Adding ${f.name}...`;
+  const body = new FormData(); body.append("file", f);
+  try {
+    const d = await api("/ingest", {method: "POST", body});
+    $("status").textContent = d.skipped ? `${f.name} was already added.` : `Added ${f.name}: ${d.n_chunks} passages.`;
+  } catch (err) { $("status").textContent = `Could not add ${f.name}: ${err.message}`; }
+  $("file").value = "";
+});
+</script>
+</body>
+</html>
