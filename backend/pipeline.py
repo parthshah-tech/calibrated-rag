@@ -68,7 +68,7 @@ class RAGPipeline:
                     [h.chunk_id for h in res.dense],
                     [h.chunk_id for h in res.bm25],
                     metric=self.settings.confidence_metric,
-                    k=max(k, 10),
+                    k=self.settings.confidence_k,
                 )
             with tracer.span("rrf"):
                 res.fused = rrf(
