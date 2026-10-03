@@ -29,3 +29,9 @@ def test_rejects_bad_input(pipeline):
     assert c.post("/ingest", files={"file": ("x.exe", b"zz")}).status_code == 415
     assert c.post("/search", json={"query": "x", "mode": "nope"}).status_code == 422
     assert c.post("/search", json={"query": ""}).status_code == 422
+
+
+def test_root_serves_the_search_page(pipeline):
+    r = client(pipeline).get("/")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert "Ask your documents" in r.text and "/search" in r.text

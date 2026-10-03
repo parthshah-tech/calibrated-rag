@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings
@@ -35,6 +37,13 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
         if holder["p"] is None:  # lazy so importing the app does not load models
             holder["p"] = build_pipeline()
         return holder["p"]
+
+    @app.get("/", include_in_schema=False)
+    def index():
+        page = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
+        if not page.exists():
+            raise HTTPException(404, "frontend/index.html is missing")
+        return FileResponse(page)
 
     @app.get("/health")
     def health():
