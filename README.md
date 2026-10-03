@@ -11,8 +11,6 @@ rankings is turned into a calibrated confidence signal, which is then used three
 2. **Used by the system** to route each query through a cheaper or more thorough pipeline.
 3. **Used to suggest better phrasings**, verified by re-running retrieval, not guessed.
 
-Everything is measured by an eval harness that reports Recall@k, MRR, latency and
-confidence intervals, so every claim below is backed by a number, not "it seemed to work".
 
 > Course context: BITS F364 (Human-Computer Interaction) group project,
 > *Calibrated Trust in RAG Answers via Retrieval Disagreement Signals*.
@@ -31,8 +29,6 @@ confidence intervals, so every claim below is backed by a number, not "it seemed
 | Verified reformulations, study mode, export | planned, Phase 3 |
 | Confidence-gated routing, Retrieval Inspector, semantic chunking, full ablation | planned, Phase 4 |
 
-Update this table as phases land. Do not claim numbers in this README until the eval
-harness has produced them.
 
 ---
 
