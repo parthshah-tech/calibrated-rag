@@ -70,10 +70,22 @@ class CachedEmbedder:
             self._cache.popitem(last=False)
         return out
 
+    def clear(self) -> None:
+        """Drop cached vectors (keeps hit/miss counters). Benchmarks call this so every mode
+        pays the full query-encoding cost instead of reusing another mode's work."""
+        self._cache.clear()
+
     @property
     def hit_rate(self) -> float:
         total = self.hits + self.misses
         return self.hits / total if total else 0.0
+
+
+def clear_cache(embedder: Embedder) -> None:
+    """Clear the embedder's cache if it has one."""
+    clear = getattr(embedder, "clear", None)
+    if clear is not None:
+        clear()
 
 
 def build_embedder(kind: str, model: str) -> Embedder:

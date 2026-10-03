@@ -16,7 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from backend.config import Settings
-from backend.embedder import build_embedder
+from backend.embedder import build_embedder, clear_cache
 from backend.interfaces import Chunk
 from backend.pipeline import RAGPipeline
 from backend.vector_store import InMemoryVectorStore
@@ -25,6 +25,12 @@ from eval.metrics import hit_at_k, mrr_at_k, ndcg_at_k, recall_at_k
 from eval.stats import bootstrap_ci, paired_bootstrap, percentile
 
 MODES = ("dense", "bm25", "hybrid")
+
+
+def retrieval_ms(trace: dict) -> float:
+    """Total time minus the final chunk-text fetch (not part of retrieval proper)."""
+    fetch = sum(s["ms"] for s in trace["spans"] if s["name"] == "fetch_chunks")
+    return trace["total_ms"] - fetch
 
 
 def embed_corpus(ids, texts, embedder, cache: Path | None, batch: int = 128, log=print):
@@ -58,6 +64,7 @@ def evaluate_dataset(name, corpus, queries, qrels, embedder, cache=None, log=pri
     for mode in MODES:
         log(f"  mode={mode}")
         for qid, q in queries.items():
+            clear_cache(embedder)  # no mode may reuse another mode's query embedding
             res = pipeline.retrieve(q, k=100, mode=mode)
             ranked = [h.chunk_id for h in res.fused]
             rels = qrels[qid]
@@ -73,6 +80,7 @@ def evaluate_dataset(name, corpus, queries, qrels, embedder, cache=None, log=pri
                     "conf_score": res.confidence.score if res.confidence else None,
                     "conf_bucket": res.confidence.bucket if res.confidence else None,
                     "latency_ms": res.trace["total_ms"],
+                    "retrieval_ms": retrieval_ms(res.trace),
                 }
             )
     return {"records": records, "summary": summarize(records)}
@@ -89,8 +97,8 @@ def summarize(records: list[dict]) -> dict:
                 k: dict(zip(("mean", "lo", "hi"), bootstrap_ci([r[k] for r in vals]), strict=True))
                 for k in ("ndcg10", "mrr10", "recall100")
             },
-            "latency_p50_ms": percentile([r["latency_ms"] for r in vals], 50),
-            "latency_p95_ms": percentile([r["latency_ms"] for r in vals], 95),
+            "latency_p50_ms": percentile([r["retrieval_ms"] for r in vals], 50),
+            "latency_p95_ms": percentile([r["retrieval_ms"] for r in vals], 95),
         }
     for other in ("dense", "bm25"):
         qids = sorted(by_mode["hybrid"])
@@ -104,14 +112,14 @@ def summarize(records: list[dict]) -> dict:
 def format_summary(name: str, summary: dict) -> str:
     lines = [
         f"\n== {name} ==",
-        f"{'mode':8} {'nDCG@10':>22} {'MRR@10':>8} {'R@100':>7} {'p50 ms':>8} {'p95 ms':>8}",
+        f"{'mode':8} {'nDCG@10':>22} {'MRR@10':>8} {'R@100':>7} {'retr p50':>9} {'retr p95':>9}",
     ]
     for m, s in summary["modes"].items():
         nd = s["ndcg10"]
         lines.append(
             f"{m:8} {nd['mean']:.3f} [{nd['lo']:.3f}, {nd['hi']:.3f}] "
             f"{s['mrr10']['mean']:8.3f} {s['recall100']['mean']:7.3f} "
-            f"{s['latency_p50_ms']:8.1f} {s['latency_p95_ms']:8.1f}"
+            f"{s['latency_p50_ms']:9.1f} {s['latency_p95_ms']:9.1f}"
         )
     for k, c in summary["comparisons"].items():
         flag = "significant" if c["significant"] else "not significant"
