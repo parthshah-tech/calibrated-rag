@@ -31,7 +31,7 @@ CONF_METRICS = ("overlap", "rbo", "tau")
 
 def conf_by_metric(res, k: int) -> dict:
     """Confidence score under every metric for one hybrid result (None for other modes)."""
-    if not (res.dense and res.bm25):
+    if res.confidence is None:  # not a hybrid retrieval; an empty list is still a valid input
         return {f"conf_{m}": None for m in CONF_METRICS}
     d, b = [h.chunk_id for h in res.dense], [h.chunk_id for h in res.bm25]
     return {f"conf_{m}": compute_confidence(d, b, metric=m, k=k).score for m in CONF_METRICS}

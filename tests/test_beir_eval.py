@@ -93,3 +93,17 @@ def test_every_mode_pays_for_its_own_query_embedding():
     assert emb.misses == 60 + 2 * 40
     assert emb.hits == 0
     assert all("retrieval_ms" in r and r["retrieval_ms"] <= r["latency_ms"] for r in out["records"])
+
+
+def test_hybrid_queries_with_no_bm25_hits_still_get_every_confidence_metric():
+    # Real data has queries whose terms match nothing in BM25 (empty sparse list). The pipeline
+    # still reports confidence for them, so every metric must be stored too.
+    corpus, queries, qrels = synthetic(60, 5)
+    queries["q_noise"] = "zzzzunseen qqqqmissing"
+    qrels["q_noise"] = {"d0": 1}
+    out = evaluate_dataset("toy", corpus, queries, qrels, HashEmbedder(), log=lambda *_: None)
+    noise = [r for r in out["records"] if r["mode"] == "hybrid" and r["qid"] == "q_noise"][0]
+    assert noise["conf_score"] is not None
+    for m in ("overlap", "rbo", "tau"):
+        assert noise[f"conf_{m}"] is not None
+    assert noise["conf_rbo"] == noise["conf_score"]
