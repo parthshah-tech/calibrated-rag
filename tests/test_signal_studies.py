@@ -67,3 +67,16 @@ def test_run_covers_all_dataset_pairs_and_load_rows_validates(tmp_path):
     bad.write_text(json.dumps({"records": stripped}))
     with pytest.raises(SystemExit):
         load_rows(bad)
+
+
+def test_transfer_skill_against_the_test_base_rate_is_never_more_flattering():
+    rng = np.random.default_rng(0)
+    s_a = rng.uniform(0, 1, 800)
+    y_a = rng.uniform(0, 1, 800) < 0.5 * s_a  # low base rate in A
+    s_b = rng.uniform(0, 1, 800)
+    y_b = rng.uniform(0, 1, 800) < np.clip(0.5 + 0.5 * s_b, 0, 1)  # high base rate in B
+    t = transfer_calibration(s_a, y_a, s_b, y_b)
+    assert t["brier_skill"] >= t["brier_skill_vs_test_base"]  # the oracle constant is the best
+    assert t["brier_skill"] - t["brier_skill_vs_test_base"] > 0.05  # and base rates really differ
+    same = transfer_calibration(s_b, y_b, s_b, y_b)
+    assert same["brier_skill"] == pytest.approx(same["brier_skill_vs_test_base"], abs=1e-9)
