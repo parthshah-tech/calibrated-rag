@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
+from backend.confidence import compute_confidence
 from backend.config import Settings
 from backend.embedder import build_embedder, clear_cache
 from backend.interfaces import Chunk
@@ -25,6 +26,15 @@ from eval.metrics import hit_at_k, mrr_at_k, ndcg_at_k, recall_at_k
 from eval.stats import bootstrap_ci, paired_bootstrap, percentile
 
 MODES = ("dense", "bm25", "hybrid")
+CONF_METRICS = ("overlap", "rbo", "tau")
+
+
+def conf_by_metric(res, k: int) -> dict:
+    """Confidence score under every metric for one hybrid result (None for other modes)."""
+    if not (res.dense and res.bm25):
+        return {f"conf_{m}": None for m in CONF_METRICS}
+    d, b = [h.chunk_id for h in res.dense], [h.chunk_id for h in res.bm25]
+    return {f"conf_{m}": compute_confidence(d, b, metric=m, k=k).score for m in CONF_METRICS}
 
 
 def retrieval_ms(trace: dict) -> float:
@@ -79,6 +89,7 @@ def evaluate_dataset(name, corpus, queries, qrels, embedder, cache=None, log=pri
                     "success": bool(hit_at_k(ranked, rels, 10)),
                     "conf_score": res.confidence.score if res.confidence else None,
                     "conf_bucket": res.confidence.bucket if res.confidence else None,
+                    **conf_by_metric(res, settings.confidence_k),
                     "latency_ms": res.trace["total_ms"],
                     "retrieval_ms": retrieval_ms(res.trace),
                 }

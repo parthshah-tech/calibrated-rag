@@ -150,3 +150,40 @@ def cv_isotonic(scores, labels, folds: int = 5, seed: int = 0) -> dict:
         "brier_base": b_base,
         "brier_skill": 1 - b_cal / b_base if b_base > 0 else NAN,
     }
+
+
+def transfer_calibration(train_scores, train_labels, test_scores, test_labels) -> dict:
+    """Fit isotonic calibration on one dataset, evaluate on another. brier_skill is measured
+    against predicting the training set's base rate; negative means the transfer hurt."""
+    cal = IsotonicCalibrator().fit(train_scores, train_labels)
+    pred = cal.predict(test_scores)
+    y = np.asarray(test_labels, dtype=float)
+    base = float(np.mean(train_labels))
+    b_cal = float(np.mean((pred - y) ** 2))
+    b_base = float(np.mean((base - y) ** 2))
+    return {
+        "ece": ece(pred, y),
+        "brier_cal": b_cal,
+        "brier_base": b_base,
+        "brier_skill": 1 - b_cal / b_base if b_base > 0 else NAN,
+    }
+
+
+def auroc_diff_ci(
+    scores_a, scores_b, labels, n_boot: int = 1000, alpha: float = 0.05, seed: int = 0
+):
+    """Paired bootstrap of AUROC(a) - AUROC(b) over the same queries."""
+    a = np.asarray(scores_a, dtype=float)
+    b = np.asarray(scores_b, dtype=float)
+    y = np.asarray(labels, dtype=bool)
+    rng = np.random.default_rng(seed)
+    diffs = []
+    for _ in range(n_boot):
+        idx = rng.integers(0, len(y), len(y))
+        da, db = auroc(a[idx], y[idx]), auroc(b[idx], y[idx])
+        if not (np.isnan(da) or np.isnan(db)):
+            diffs.append(da - db)
+    point = auroc(a, y) - auroc(b, y)
+    if not diffs:
+        return point, NAN, NAN
+    return point, float(np.quantile(diffs, alpha / 2)), float(np.quantile(diffs, 1 - alpha / 2))

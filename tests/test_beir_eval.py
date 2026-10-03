@@ -27,6 +27,10 @@ def test_evaluate_dataset_end_to_end():
     hybrid = [r for r in recs if r["mode"] == "hybrid"]
     assert all(r["conf_score"] is not None for r in hybrid)
     assert all(r["conf_score"] is None for r in recs if r["mode"] != "hybrid")
+    for m in ("overlap", "rbo", "tau"):  # every metric is stored so signal studies can compare
+        assert all(r[f"conf_{m}"] is not None for r in hybrid)
+        assert all(r[f"conf_{m}"] is None for r in recs if r["mode"] != "hybrid")
+    assert all(r["conf_rbo"] == r["conf_score"] for r in hybrid)  # default metric is rbo
     assert out["summary"]["modes"]["hybrid"]["ndcg10"]["mean"] > 0.9  # lexical toy task is easy
     assert "hybrid_vs_dense_ndcg10" in out["summary"]["comparisons"]
     assert "nDCG@10" in format_summary("toy", out["summary"])
