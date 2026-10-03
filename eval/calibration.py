@@ -153,19 +153,24 @@ def cv_isotonic(scores, labels, folds: int = 5, seed: int = 0) -> dict:
 
 
 def transfer_calibration(train_scores, train_labels, test_scores, test_labels) -> dict:
-    """Fit isotonic calibration on one dataset, evaluate on another. brier_skill is measured
-    against predicting the training set's base rate; negative means the transfer hurt."""
+    """Fit isotonic calibration on one dataset, evaluate on another.
+
+    Two Brier-skill baselines are reported. `brier_skill` compares with always predicting the
+    TRAINING set's base rate, which flatters a transfer when the base rates differ.
+    `brier_skill_vs_test_base` compares with the test set's own base rate (the best possible
+    constant predictor), the stricter and fairer measure of what the calibrator adds."""
     cal = IsotonicCalibrator().fit(train_scores, train_labels)
     pred = cal.predict(test_scores)
     y = np.asarray(test_labels, dtype=float)
-    base = float(np.mean(train_labels))
     b_cal = float(np.mean((pred - y) ** 2))
-    b_base = float(np.mean((base - y) ** 2))
+    b_base = float(np.mean((float(np.mean(train_labels)) - y) ** 2))
+    b_oracle = float(np.mean((y.mean() - y) ** 2))
     return {
         "ece": ece(pred, y),
         "brier_cal": b_cal,
         "brier_base": b_base,
         "brier_skill": 1 - b_cal / b_base if b_base > 0 else NAN,
+        "brier_skill_vs_test_base": 1 - b_cal / b_oracle if b_oracle > 0 else NAN,
     }
 
 

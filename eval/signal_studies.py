@@ -106,7 +106,9 @@ def format_report(report: dict) -> str:
         for r in t["B_buckets"]:
             lines.append(f"    {r['bucket']:7} n={r['n']:4} success {r['rate']:.2f}")
         lines.append(
-            f"  calibration on B, fit on A: ECE {a['ece']:.3f}, skill {a['brier_skill']:+.3f}"
+            f"  calibration on B, fit on A: ECE {a['ece']:.3f}, Brier skill "
+            f"{a['brier_skill']:+.3f} vs A's base rate, "
+            f"{a['brier_skill_vs_test_base']:+.3f} vs B's own base rate"
         )
         lines.append(
             f"  calibration on B, fit in B: ECE {w['ece']:.3f}, skill {w['brier_skill']:+.3f}"
