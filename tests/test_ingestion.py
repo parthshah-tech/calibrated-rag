@@ -48,3 +48,14 @@ def test_embedding_cache_counts_hits():
     emb.embed(["a b", "e f"])
     assert (emb.hits, emb.misses) == (1, 3)
     assert emb.hit_rate == pytest.approx(0.25)
+
+
+def test_cache_clear_forces_recompute_but_keeps_counters():
+    from backend.embedder import clear_cache
+
+    emb = CachedEmbedder(HashEmbedder())
+    emb.embed(["a b"])
+    clear_cache(emb)
+    emb.embed(["a b"])
+    assert (emb.hits, emb.misses) == (0, 2)
+    clear_cache(HashEmbedder())  # embedders without a cache are left alone

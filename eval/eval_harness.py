@@ -15,7 +15,7 @@ from collections import Counter
 from pathlib import Path
 
 from backend.config import Settings
-from backend.embedder import build_embedder
+from backend.embedder import build_embedder, clear_cache
 from backend.ingestion import SUPPORTED
 from backend.pipeline import RAGPipeline
 from backend.vector_store import InMemoryVectorStore
@@ -43,6 +43,7 @@ def run_harness(corpus_dir, qa, embedder, strategies=STRATEGIES, size=512, overl
         for item in qa:
             gold = _norm(item.get("gold_phrase", ""))
             for mode in MODES:
+                clear_cache(embedder)  # keep per-mode latency comparable
                 res = pipe.retrieve(item["question"], k=k, mode=mode)
                 ranked = [h.chunk_id for h in res.fused]
                 answerable = bool(item.get("answerable", True))

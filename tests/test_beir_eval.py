@@ -77,3 +77,15 @@ def test_validate_group_reports_signal_when_there_is_one():
     assert g["monotonic"]
     low, _, high = (r["rate"] for r in g["heldout_buckets"])
     assert high > low
+
+
+def test_every_mode_pays_for_its_own_query_embedding():
+    from backend.embedder import CachedEmbedder
+
+    emb = CachedEmbedder(HashEmbedder())
+    corpus, queries, qrels = synthetic(60, 40)
+    out = evaluate_dataset("toy", corpus, queries, qrels, emb, log=lambda *_: None)
+    # corpus once, then query embeddings for dense AND hybrid (bm25 needs none); no cache reuse
+    assert emb.misses == 60 + 2 * 40
+    assert emb.hits == 0
+    assert all("retrieval_ms" in r and r["retrieval_ms"] <= r["latency_ms"] for r in out["records"])
