@@ -19,6 +19,7 @@ class Settings:
     embedder: str = "sentence-transformers"
     embed_model: str = "all-MiniLM-L6-v2"
     confidence_metric: str = "rbo"
+    confidence_k: int = 10  # depth of the top-k lists the signal compares; independent of result k
     candidate_pool: int = 50
     rrf_k: int = 60
     study_mode: bool = False
@@ -34,6 +35,7 @@ class Settings:
             embedder=e.get("EMBEDDER", cls.embedder),
             embed_model=e.get("EMBED_MODEL", cls.embed_model),
             confidence_metric=e.get("CONFIDENCE_METRIC", cls.confidence_metric),
+            confidence_k=_int("CONFIDENCE_K", cls.confidence_k),
             candidate_pool=_int("CANDIDATE_POOL", cls.candidate_pool),
             rrf_k=_int("RRF_K", cls.rrf_k),
             study_mode=e.get("STUDY_MODE", "0") == "1",
