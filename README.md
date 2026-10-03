@@ -1,5 +1,7 @@
 # RAG Project — Confidence-Aware Hybrid Retrieval
 
+[![ci](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml)
+
 A hybrid retrieval-augmented generation pipeline (dense embeddings + BM25, fused with
 Reciprocal Rank Fusion, cross-encoder reranking, multi-query expansion, history-aware
 rewriting) that **knows when it is unsure**. The disagreement between the dense and BM25
@@ -24,13 +26,61 @@ confidence intervals, so every claim below is backed by a number, not "it seemed
 |---|---|
 | Ingestion (content-hashed, idempotent), chunking (fixed, recursive), dense (Chroma) + BM25 + RRF, tracing, upload/search API, CI | built, Phase 0 |
 | `confidence.py` (overlap, RBO, tau-on-intersection) wired into retrieval | built (thresholds are placeholders) |
-| Eval harness + offline signal validation | planned, Phase 1 |
+| Eval harness, BEIR runner, signal validation, signal studies | built, Phase 1 |
 | Reranking, multi-query, history-aware rewrite, badge UI | planned, Phase 2 |
 | Verified reformulations, study mode, export | planned, Phase 3 |
 | Confidence-gated routing, Retrieval Inspector, semantic chunking, full ablation | planned, Phase 4 |
 
 Update this table as phases land. Do not claim numbers in this README until the eval
 harness has produced them.
+
+---
+
+## Results (v1)
+
+All numbers come from `benchmarks/results/` and reproduce with the commands in
+[`benchmarks/results/README.md`](benchmarks/results/README.md). Retrieval and signal numbers
+are deterministic (fixed seeds, cached embeddings); latency varies run to run and is not
+reported yet.
+
+**Hybrid retrieval vs the single retrievers**, BEIR test sets, nDCG@10 (95% bootstrap CI):
+
+| Dataset | Dense | BM25 | Hybrid (RRF) | Hybrid minus dense |
+|---|---|---|---|---|
+| SciFact (300 queries) | 0.645 | 0.652 | 0.682 | +0.037 [+0.009, +0.064] |
+| NFCorpus (323 queries) | 0.317 | 0.306 | 0.342 | +0.025 [+0.010, +0.041] |
+
+**Does the confidence signal predict retrieval success?** The signal is how much the dense and
+BM25 rankings agree (rank-biased overlap of their top 10, computed before fusion). Success means
+a relevant document appears in the top 10. Held-out half, 95% CI:
+
+| Dataset | AUROC | Success in Low, Medium, High |
+|---|---|---|
+| SciFact | 0.810 [0.742, 0.869] | 52%, 91%, 100% |
+| NFCorpus | 0.752 [0.692, 0.806] | 48%, 74%, 85% |
+
+**Which agreement metric is best?** AUROC [95% CI]:
+
+| | SciFact | NFCorpus | Pooled |
+|---|---|---|---|
+| RBO (default) | 0.810 [0.742, 0.869] | 0.752 [0.692, 0.806] | 0.784 [0.740, 0.823] |
+| Top-10 overlap | 0.700 [0.621, 0.777] | 0.740 [0.678, 0.800] | 0.733 [0.684, 0.778] |
+| Tau-based score* | 0.720 [0.651, 0.786] | 0.719 [0.661, 0.776] | 0.726 [0.683, 0.768] |
+
+RBO beats both significantly on SciFact and pooled (paired bootstrap on AUROC differences);
+on NFCorpus the three are statistically indistinguishable. *Our tau score is Kendall's tau on
+the shared items, rescaled to [0, 1] and weighted by the shared fraction (a provisional
+definition).
+
+**Do thresholds transfer between datasets?** The ordering does: under the other dataset's
+cutoffs, success still rises from Low to High (58%, 86%, 92% on NFCorpus using SciFact's
+cutoffs; 48%, 79%, 94% in reverse). Bucket sizes do not: under SciFact's cutoffs 55% of
+NFCorpus queries fall in Low. Calibration error after transfer stayed close to within-dataset
+calibration (ECE 0.068 and 0.042 vs 0.046 and 0.058, within noise at this sample size).
+
+**Caveats.** Success means a relevant document was retrieved, not that an answer was correct.
+Two datasets, both scientific or biomedical text. Cutoffs and calibration must be refit
+on any new corpus.
 
 ---
 
