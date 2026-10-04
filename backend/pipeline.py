@@ -3,14 +3,17 @@ pre-fusion confidence signal. Later phases add rewrite, multi-query, rerank, rou
 
 from __future__ import annotations
 
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from .bm25_index import BM25Index
 from .confidence import compute_confidence
 from .config import Settings
+from .generation import Answer, generate_answer
 from .hybrid_retrieval import rrf
 from .ingestion import Ingestor
 from .interfaces import Embedder, IngestResult, RetrievalResult, VectorStore
+from .llm import LLMClient, LLMError
 from .tracing import Tracer
 
 MODES = ("dense", "bm25", "hybrid")
@@ -23,8 +26,10 @@ class RAGPipeline:
         embedder: Embedder,
         settings: Settings | None = None,
         parallel: bool = True,
+        llm: LLMClient | None = None,
     ) -> None:
         self.settings = settings or Settings()
+        self.llm = llm
         self.store, self.embedder = store, embedder
         self.bm25 = BM25Index()
         self.bm25.rebuild_from(store.all_chunks())  # restart-safe: sparse index from stored chunks
@@ -82,3 +87,26 @@ class RAGPipeline:
             res.chunks = {c.id: c for c in self.store.get([h.chunk_id for h in res.fused])}
         res.trace = tracer.to_dict()
         return res
+
+    def answer(
+        self, query: str, k: int = 5, mode: str = "hybrid"
+    ) -> tuple[RetrievalResult, Answer | None, str | None]:
+        """Retrieve, then write a grounded answer. Retrieval always survives an LLM failure:
+        the third item is an error message when no answer could be produced."""
+        res = self.retrieve(query, k, mode)
+        if self.llm is None:
+            return res, None, "Generation is off: set LLM_API_KEY (or GROQ_API_KEY) in .env."
+        chunks = [res.chunks[h.chunk_id] for h in res.fused if h.chunk_id in res.chunks]
+        t0 = time.perf_counter()
+        try:
+            ans = generate_answer(self.llm, query, chunks)
+        except LLMError as e:
+            return res, None, str(e)
+        ms = round((time.perf_counter() - t0) * 1000, 3)
+        res.trace["spans"].append({"name": "generate", "ms": ms})
+        res.trace["total_ms"] = round(res.trace["total_ms"] + ms, 3)
+        counters = res.trace["counters"]
+        if ans.model != "none":
+            counters["llm_calls"] = counters.get("llm_calls", 0) + 1
+            counters["llm_cache_hits"] = counters.get("llm_cache_hits", 0) + int(ans.cached)
+        return res, ans, None

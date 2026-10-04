@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from .config import Settings
 from .embedder import build_embedder
 from .ingestion import SUPPORTED
+from .llm import build_llm
 from .pipeline import MODES, RAGPipeline
 from .vector_store import ChromaVectorStore
 
@@ -26,7 +27,7 @@ def build_pipeline(settings: Settings | None = None) -> RAGPipeline:
     settings = settings or Settings.from_env()
     store = ChromaVectorStore(f"{settings.data_dir}/chroma")
     embedder = build_embedder(settings.embedder, settings.embed_model)
-    return RAGPipeline(store, embedder, settings)
+    return RAGPipeline(store, embedder, settings, llm=build_llm(settings))
 
 
 def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
@@ -47,7 +48,9 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
 
     @app.get("/health")
     def health():
-        return {"status": "ok"}
+        p = holder["p"]
+        llm = p.llm is not None if p is not None else bool(Settings.from_env().llm_api_key)
+        return {"status": "ok", "llm_configured": llm}
 
     @app.post("/ingest")
     async def ingest(file: UploadFile):
@@ -56,11 +59,7 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
             raise HTTPException(415, f"unsupported file type; supported: {sorted(SUPPORTED)}")
         return asdict(get().ingest(name, await file.read()))
 
-    @app.post("/search")
-    def search(req: SearchRequest):
-        if req.mode not in MODES:
-            raise HTTPException(422, f"mode must be one of {list(MODES)}")
-        r = get().retrieve(req.query, req.k, req.mode)
+    def payload(r) -> dict:
         return {
             "query": r.query,
             "mode": r.mode,
@@ -79,6 +78,21 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
             ],
             "trace": r.trace,
         }
+
+    def check_mode(req: SearchRequest) -> None:
+        if req.mode not in MODES:
+            raise HTTPException(422, f"mode must be one of {list(MODES)}")
+
+    @app.post("/search")
+    def search(req: SearchRequest):
+        check_mode(req)
+        return payload(get().retrieve(req.query, req.k, req.mode))
+
+    @app.post("/ask")
+    def ask(req: SearchRequest):
+        check_mode(req)
+        r, ans, err = get().answer(req.query, req.k, req.mode)
+        return {**payload(r), "answer": asdict(ans) if ans else None, "answer_error": err}
 
     return app
 
