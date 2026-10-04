@@ -107,3 +107,32 @@ def test_hybrid_queries_with_no_bm25_hits_still_get_every_confidence_metric():
     for m in ("overlap", "rbo", "tau"):
         assert noise[f"conf_{m}"] is not None
     assert noise["conf_rbo"] == noise["conf_score"]
+
+
+def test_rerank_mode_is_recorded_and_compared():
+    from backend.reranker import LexicalOverlapReranker
+
+    corpus, queries, qrels = synthetic(60, 20)
+    out = evaluate_dataset(
+        "toy",
+        corpus,
+        queries,
+        qrels,
+        HashEmbedder(),
+        log=lambda *_: None,
+        reranker=LexicalOverlapReranker(),
+        rerank_pool=15,
+    )
+    rr = [r for r in out["records"] if r["mode"] == "hybrid+rerank"]
+    assert len(rr) == 20 and all(r["rerank_pairs"] == 15 for r in rr)
+    assert all(r["conf_score"] is None and r["conf_rbo"] is None for r in rr)  # recorded once
+    s = out["summary"]
+    assert s["modes"]["hybrid+rerank"]["rerank_pairs_mean"] == 15
+    assert s["modes"]["hybrid"]["rerank_pairs_mean"] == 0
+    assert "hybrid+rerank_vs_hybrid_ndcg10" in s["comparisons"]
+
+
+def test_without_a_reranker_the_summary_has_no_rerank_mode():
+    corpus, queries, qrels = synthetic(60, 10)
+    out = evaluate_dataset("toy", corpus, queries, qrels, HashEmbedder(), log=lambda *_: None)
+    assert "hybrid+rerank" not in out["summary"]["modes"]

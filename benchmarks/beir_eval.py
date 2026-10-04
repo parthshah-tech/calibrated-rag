@@ -20,12 +20,14 @@ from backend.config import Settings
 from backend.embedder import build_embedder, clear_cache
 from backend.interfaces import Chunk
 from backend.pipeline import RAGPipeline
+from backend.reranker import CrossEncoderReranker
 from backend.vector_store import InMemoryVectorStore
 from eval import beir
 from eval.metrics import hit_at_k, mrr_at_k, ndcg_at_k, recall_at_k
 from eval.stats import bootstrap_ci, paired_bootstrap, percentile
 
 MODES = ("dense", "bm25", "hybrid")
+RERANK_MODE = "hybrid+rerank"  # hybrid retrieval, then cross-encoder over the top candidates
 CONF_METRICS = ("overlap", "rbo", "tau")
 
 
@@ -62,20 +64,25 @@ def embed_corpus(ids, texts, embedder, cache: Path | None, batch: int = 128, log
     return out
 
 
-def evaluate_dataset(name, corpus, queries, qrels, embedder, cache=None, log=print) -> dict:
+def evaluate_dataset(
+    name, corpus, queries, qrels, embedder, cache=None, log=print, reranker=None, rerank_pool=50
+) -> dict:
     ids = list(corpus)
     chunks = [Chunk(d, d, corpus[d], name, 0, 0, len(corpus[d])) for d in ids]
     log(f"[{name}] {len(ids)} docs, {len(queries)} queries")
     store = InMemoryVectorStore()
     store.add(chunks, embed_corpus(ids, [c.text for c in chunks], embedder, cache, log=log))
-    settings = Settings(candidate_pool=100, confidence_k=10)
-    pipeline = RAGPipeline(store, embedder, settings)  # builds BM25 from the store's chunks
+    settings = Settings(candidate_pool=100, confidence_k=10, rerank_pool=rerank_pool)
+    pipeline = RAGPipeline(store, embedder, settings, reranker=reranker)  # builds BM25 itself
     records = []
-    for mode in MODES:
+    modes = MODES + ((RERANK_MODE,) if reranker is not None else ())
+    for mode in modes:
         log(f"  mode={mode}")
         for qid, q in queries.items():
             clear_cache(embedder)  # no mode may reuse another mode's query embedding
-            res = pipeline.retrieve(q, k=100, mode=mode)
+            is_rr = mode == RERANK_MODE
+            res = pipeline.retrieve(q, k=100, mode="hybrid" if is_rr else mode, rerank=is_rr)
+            no_conf = {f"conf_{m}": None for m in CONF_METRICS}  # recorded once, under plain hybrid
             ranked = [h.chunk_id for h in res.fused]
             rels = qrels[qid]
             records.append(
@@ -87,9 +94,10 @@ def evaluate_dataset(name, corpus, queries, qrels, embedder, cache=None, log=pri
                     "mrr10": mrr_at_k(ranked, rels, 10),
                     "recall100": recall_at_k(ranked, rels, 100),
                     "success": bool(hit_at_k(ranked, rels, 10)),
-                    "conf_score": res.confidence.score if res.confidence else None,
-                    "conf_bucket": res.confidence.bucket if res.confidence else None,
-                    **conf_by_metric(res, settings.confidence_k),
+                    "conf_score": res.confidence.score if res.confidence and not is_rr else None,
+                    "conf_bucket": res.confidence.bucket if res.confidence and not is_rr else None,
+                    **(no_conf if is_rr else conf_by_metric(res, settings.confidence_k)),
+                    "rerank_pairs": res.trace["counters"].get("rerank_pairs", 0),
                     "latency_ms": res.trace["total_ms"],
                     "retrieval_ms": retrieval_ms(res.trace),
                 }
@@ -99,7 +107,8 @@ def evaluate_dataset(name, corpus, queries, qrels, embedder, cache=None, log=pri
 
 def summarize(records: list[dict]) -> dict:
     out: dict = {"modes": {}, "comparisons": {}}
-    by_mode = {m: {r["qid"]: r for r in records if r["mode"] == m} for m in MODES}
+    present = [m for m in (*MODES, RERANK_MODE) if any(r["mode"] == m for r in records)]
+    by_mode = {m: {r["qid"]: r for r in records if r["mode"] == m} for m in present}
     for m, rows in by_mode.items():
         vals = list(rows.values())
         out["modes"][m] = {
@@ -108,6 +117,7 @@ def summarize(records: list[dict]) -> dict:
                 k: dict(zip(("mean", "lo", "hi"), bootstrap_ci([r[k] for r in vals]), strict=True))
                 for k in ("ndcg10", "mrr10", "recall100")
             },
+            "rerank_pairs_mean": sum(r.get("rerank_pairs", 0) for r in vals) / max(len(vals), 1),
             "latency_p50_ms": percentile([r["retrieval_ms"] for r in vals], 50),
             "latency_p95_ms": percentile([r["retrieval_ms"] for r in vals], 95),
         }
@@ -116,6 +126,12 @@ def summarize(records: list[dict]) -> dict:
         out["comparisons"][f"hybrid_vs_{other}_ndcg10"] = paired_bootstrap(
             [by_mode["hybrid"][q]["ndcg10"] for q in qids],
             [by_mode[other][q]["ndcg10"] for q in qids],
+        )
+    if RERANK_MODE in by_mode:
+        qids = sorted(by_mode["hybrid"])
+        out["comparisons"][f"{RERANK_MODE}_vs_hybrid_ndcg10"] = paired_bootstrap(
+            [by_mode[RERANK_MODE][q]["ndcg10"] for q in qids],
+            [by_mode["hybrid"][q]["ndcg10"] for q in qids],
         )
     return out
 
@@ -148,9 +164,13 @@ def main(argv=None) -> None:
     ap.add_argument("--model", default="all-MiniLM-L6-v2")
     ap.add_argument("--limit-queries", type=int, default=None, help="quick runs only")
     ap.add_argument("--out", default="benchmarks/results/beir.json")
+    ap.add_argument("--rerank", action="store_true", help="also run hybrid + cross-encoder rerank")
+    ap.add_argument("--rerank-pool", type=int, default=50, help="candidates the reranker re-scores")
+    ap.add_argument("--rerank-model", default="cross-encoder/ms-marco-MiniLM-L-6-v2")
     args = ap.parse_args(argv)
 
     embedder = build_embedder(args.embedder, args.model)
+    reranker = CrossEncoderReranker(args.rerank_model) if args.rerank else None
     all_records, summaries = [], {}
     for name in args.datasets:
         path = beir.download(name, args.data_dir)
@@ -159,7 +179,14 @@ def main(argv=None) -> None:
             queries = dict(list(queries.items())[: args.limit_queries])
         tag = args.model.replace("/", "_") if args.embedder != "hash" else "hash"
         result = evaluate_dataset(
-            name, corpus, queries, qrels, embedder, Path(args.data_dir) / name / f"emb-{tag}.npz"
+            name,
+            corpus,
+            queries,
+            qrels,
+            embedder,
+            Path(args.data_dir) / name / f"emb-{tag}.npz",
+            reranker=reranker,
+            rerank_pool=args.rerank_pool,
         )
         all_records += result["records"]
         summaries[name] = result["summary"]
@@ -167,6 +194,8 @@ def main(argv=None) -> None:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     meta = {"embedder": args.embedder, "model": args.model, "exact_dense_search": True}
+    if args.rerank:
+        meta |= {"rerank_model": args.rerank_model, "rerank_pool": args.rerank_pool}
     out.write_text(
         json.dumps({"meta": meta, "summary": summaries, "records": all_records}, indent=1)
     )

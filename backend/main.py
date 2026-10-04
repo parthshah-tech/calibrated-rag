@@ -15,6 +15,7 @@ from .embedder import build_embedder
 from .ingestion import SUPPORTED
 from .llm import build_llm
 from .pipeline import MODES, RAGPipeline
+from .reranker import build_reranker
 from .vector_store import ChromaVectorStore
 
 
@@ -29,13 +30,20 @@ class SearchRequest(BaseModel):
     mode: str = "hybrid"
     history: list[Turn] = Field(default_factory=list, max_length=20)  # used by /ask
     expand: int = Field(default=0, ge=0, le=5)  # extra queries to search, used by /ask
+    rerank: bool = False  # re-score the top candidates with the cross-encoder
 
 
 def build_pipeline(settings: Settings | None = None) -> RAGPipeline:
     settings = settings or Settings.from_env()
     store = ChromaVectorStore(f"{settings.data_dir}/chroma")
     embedder = build_embedder(settings.embedder, settings.embed_model)
-    return RAGPipeline(store, embedder, settings, llm=build_llm(settings))
+    return RAGPipeline(
+        store,
+        embedder,
+        settings,
+        llm=build_llm(settings),
+        reranker=build_reranker(settings.rerank_model),
+    )
 
 
 def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
@@ -87,6 +95,7 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
             "rewritten_query": r.rewritten_query,
             "expansions": r.expansions,
             "notes": r.notes,
+            "reranked": r.reranked,
             "trace": r.trace,
         }
 
@@ -97,13 +106,13 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
     @app.post("/search")
     def search(req: SearchRequest):
         check_mode(req)
-        return payload(get().retrieve(req.query, req.k, req.mode))
+        return payload(get().retrieve(req.query, req.k, req.mode, rerank=req.rerank))
 
     @app.post("/ask")
     def ask(req: SearchRequest):
         check_mode(req)
         history = [t.model_dump() for t in req.history]
-        r, ans, err = get().answer(req.query, req.k, req.mode, history, req.expand)
+        r, ans, err = get().answer(req.query, req.k, req.mode, history, req.expand, req.rerank)
         return {**payload(r), "answer": asdict(ans) if ans else None, "answer_error": err}
 
     return app
