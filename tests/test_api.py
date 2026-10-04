@@ -91,3 +91,17 @@ def test_ask_validates_history_and_expand(loaded):
     assert c.post("/ask", json={"query": "x", "expand": 9}).status_code == 422
     too_long = {"query": "x", "history": [{"role": "user", "content": "a" * 5000}]}
     assert c.post("/ask", json=too_long).status_code == 422
+
+
+def test_search_and_ask_accept_rerank(loaded):
+    from backend.llm import FakeLLM
+    from backend.reranker import LexicalOverlapReranker
+
+    loaded.reranker = LexicalOverlapReranker()
+    loaded.llm = FakeLLM(["Answer [1]."])
+    c = client(loaded)
+    s = c.post("/search", json={"query": "XJ-4471 code", "rerank": True}).json()
+    assert s["reranked"] is True and s["trace"]["counters"]["rerank_pairs"] > 0
+    a = c.post("/ask", json={"query": "XJ-4471 code", "rerank": True}).json()
+    assert a["reranked"] is True and a["answer"]["cited"] == [1]
+    assert c.post("/search", json={"query": "XJ-4471 code"}).json()["reranked"] is False

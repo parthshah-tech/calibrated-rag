@@ -58,6 +58,7 @@ li.hit:target{background:color-mix(in srgb,var(--mid) 12%,transparent)}
     </select>
     <button class="go" type="submit">Search</button>
     <label class="opt"><input type="checkbox" id="broad"> Broaden search</label>
+    <label class="opt"><input type="checkbox" id="sharp"> Sharper ranking</label>
   </form>
   <div class="tools">
     <span id="status" role="status" aria-live="polite"></span>
@@ -91,6 +92,7 @@ function howHtml(d) {
   const bits = [];
   if (d.rewritten_query) bits.push(`Searched for: ${esc(d.rewritten_query)}`);
   if (d.expansions && d.expansions.length) bits.push(`Also searched: ${d.expansions.map(esc).join("; ")}`);
+  if (d.reranked) bits.push(`Sharper ranking: re-scored the top ${+((d.trace.counters || {}).rerank_pairs) || ""} candidates with a cross-encoder`);
   (d.notes || []).forEach(n => bits.push(esc(n)));
   return bits.length ? `<p class="how">${bits.join("<br>")}</p>` : "";
 }
@@ -129,7 +131,7 @@ $("f").addEventListener("submit", async e => {
   if (!query) return;
   $("status").textContent = "Searching and writing an answer...";
   try {
-    const d = await api("/ask", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query, k: 5, mode, history: convo.slice(-6), expand: $("broad").checked ? 3 : 0})});
+    const d = await api("/ask", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query, k: 5, mode, history: convo.slice(-6), expand: $("broad").checked ? 3 : 0, rerank: $("sharp").checked})});
     $("status").textContent = `${d.results.length} sources in ${Math.round(d.trace.total_ms)} ms`;
     const items = d.results.map((r, i) => `<li class="hit" id="src-${i + 1}"><span class="rk">${i + 1}</span><div><div class="src"><b>${esc(r.source)}</b><span>characters ${r.start} to ${r.end}</span></div>
       <div class="txt">${highlight(r.text, query)}</div></div></li>`).join("");

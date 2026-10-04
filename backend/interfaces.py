@@ -44,6 +44,8 @@ class RetrievalResult:
     rewritten_query: str | None = None  # standalone query used for search, if rewritten
     expansions: list[str] = field(default_factory=list)  # extra queries searched
     notes: list[str] = field(default_factory=list)  # degraded steps, shown to the user
+    reranked: bool = False  # the head of the ranking was re-scored by the cross-encoder
+    pre_rerank: list[Hit] = field(default_factory=list)  # the head before reranking
 
 
 class Embedder(Protocol):
