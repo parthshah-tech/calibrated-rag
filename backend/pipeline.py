@@ -10,10 +10,12 @@ from .bm25_index import BM25Index
 from .confidence import compute_confidence
 from .config import Settings
 from .generation import Answer, generate_answer
+from .history_aware import rewrite_query, trim_history
 from .hybrid_retrieval import rrf
 from .ingestion import Ingestor
 from .interfaces import Embedder, IngestResult, RetrievalResult, VectorStore
 from .llm import LLMClient, LLMError
+from .query_expansion import expand_query
 from .tracing import Tracer
 
 MODES = ("dense", "bm25", "hybrid")
@@ -41,31 +43,57 @@ class RAGPipeline:
     def ingest(self, filename: str, data: bytes) -> IngestResult:
         return self.ingestor.ingest(filename, data, on_added=self.bm25.add)
 
-    def retrieve(self, query: str, k: int = 5, mode: str = "hybrid") -> RetrievalResult:
-        if mode not in MODES:
-            raise ValueError(f"mode must be one of {MODES}")
-        tracer = Tracer()
+    def _first_pass(self, tracer: Tracer, query: str, dense: bool, bm25: bool, label: str = ""):
+        """Dense and BM25 candidate lists for one query (in parallel when both are wanted)."""
         pool = self.settings.candidate_pool
-        res = RetrievalResult(query=query, mode=mode)
 
         def run_dense():
-            with tracer.span("dense"):
+            with tracer.span("dense" + label):
                 emb = self.embedder.embed([query])[0]
                 return self.store.query(emb, pool)
 
         def run_bm25():
-            with tracer.span("bm25"):
+            with tracer.span("bm25" + label):
                 return self.bm25.search(query, pool)
 
-        want_dense, want_bm25 = mode in ("dense", "hybrid"), mode in ("bm25", "hybrid")
-        if want_dense and want_bm25 and self._pool:
+        if dense and bm25 and self._pool:
             fd, fb = self._pool.submit(run_dense), self._pool.submit(run_bm25)
-            res.dense, res.bm25 = fd.result(), fb.result()
-        else:
-            if want_dense:
-                res.dense = run_dense()
-            if want_bm25:
-                res.bm25 = run_bm25()
+            return fd.result(), fb.result()
+        return (run_dense() if dense else []), (run_bm25() if bm25 else [])
+
+    @staticmethod
+    def _llm_step(tracer: Tracer, res: RetrievalResult, name: str, step) -> None:
+        tracer.count("llm_calls")
+        tracer.count("llm_cache_hits", int(step.cached))
+        if step.error:
+            res.notes.append(f"{name} skipped: {step.error}")
+
+    def retrieve(
+        self,
+        query: str,
+        k: int = 5,
+        mode: str = "hybrid",
+        history: list[dict] | None = None,
+        expand: int = 0,
+    ) -> RetrievalResult:
+        """history: earlier turns, used to rewrite a follow-up into a standalone query.
+        expand: number of extra LLM-written queries to search too (hybrid mode only).
+        Both need an LLM and degrade silently to plain retrieval if it is missing or fails.
+        The confidence signal always uses the first-pass lists of the (rewritten) question."""
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        tracer = Tracer()
+        res = RetrievalResult(query=query, mode=mode)
+        search_query = query
+        if history and self.llm is not None:
+            with tracer.span("rewrite"):
+                rw = rewrite_query(self.llm, query, history)
+            self._llm_step(tracer, res, "rewrite", rw)
+            if rw.rewritten:
+                search_query, res.rewritten_query = rw.query, rw.query
+
+        want_dense, want_bm25 = mode in ("dense", "hybrid"), mode in ("bm25", "hybrid")
+        res.dense, res.bm25 = self._first_pass(tracer, search_query, want_dense, want_bm25)
 
         if want_dense and want_bm25:
             with tracer.span("confidence"):
@@ -75,11 +103,17 @@ class RAGPipeline:
                     metric=self.settings.confidence_metric,
                     k=self.settings.confidence_k,
                 )
+            rankings = [[h.chunk_id for h in res.dense], [h.chunk_id for h in res.bm25]]
+            if expand and self.llm is not None:
+                with tracer.span("expand"):
+                    ex = expand_query(self.llm, search_query, expand)
+                self._llm_step(tracer, res, "expansion", ex)
+                res.expansions = ex.queries
+                for i, q in enumerate(ex.queries, start=1):
+                    d, b = self._first_pass(tracer, q, True, True, label=f"#{i}")
+                    rankings += [[h.chunk_id for h in d], [h.chunk_id for h in b]]
             with tracer.span("rrf"):
-                res.fused = rrf(
-                    [[h.chunk_id for h in res.dense], [h.chunk_id for h in res.bm25]],
-                    k=self.settings.rrf_k,
-                )[:k]
+                res.fused = rrf(rankings, k=self.settings.rrf_k)[:k]
         else:
             res.fused = (res.dense or res.bm25)[:k]
 
@@ -89,17 +123,22 @@ class RAGPipeline:
         return res
 
     def answer(
-        self, query: str, k: int = 5, mode: str = "hybrid"
+        self,
+        query: str,
+        k: int = 5,
+        mode: str = "hybrid",
+        history: list[dict] | None = None,
+        expand: int = 0,
     ) -> tuple[RetrievalResult, Answer | None, str | None]:
         """Retrieve, then write a grounded answer. Retrieval always survives an LLM failure:
         the third item is an error message when no answer could be produced."""
-        res = self.retrieve(query, k, mode)
+        res = self.retrieve(query, k, mode, history, expand)
         if self.llm is None:
             return res, None, "Generation is off: set LLM_API_KEY (or GROQ_API_KEY) in .env."
         chunks = [res.chunks[h.chunk_id] for h in res.fused if h.chunk_id in res.chunks]
         t0 = time.perf_counter()
         try:
-            ans = generate_answer(self.llm, query, chunks)
+            ans = generate_answer(self.llm, query, chunks, history=trim_history(history))
         except LLMError as e:
             return res, None, str(e)
         ms = round((time.perf_counter() - t0) * 1000, 3)
