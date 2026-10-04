@@ -37,6 +37,12 @@ li.hit{display:grid;grid-template-columns:2rem 1fr;padding:1.1rem 0;border-top:1
 .txt{font:1.02rem/1.65 "Iowan Old Style","Palatino Linotype",Georgia,serif;white-space:pre-wrap;overflow-wrap:anywhere;max-width:40rem}
 mark{background:transparent;color:inherit;font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
 .empty{color:var(--muted);padding:1.5rem 0}
+.answer{margin:2rem 0 0;max-width:40rem}
+.answer .body{font:1.12rem/1.7 "Iowan Old Style","Palatino Linotype",Georgia,serif;white-space:pre-wrap}
+.answer code{font:.92em ui-monospace,Menlo,Consolas,monospace}
+.answer a{color:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.answer .by{margin:.5rem 0 0;font-size:.85rem;color:var(--muted)}
+li.hit:target{background:color-mix(in srgb,var(--mid) 12%,transparent)}
 </style>
 </head>
 <body>
@@ -71,10 +77,23 @@ function tidy(text) {
     .replace(/\*\*/g, "").replace(/\n{3,}/g, "\n\n").trim();
 }
 function highlight(text, query) {
-  const terms = (query.toLowerCase().match(/\w{3,}/g) || []).filter((t, i, a) => a.indexOf(t) === i);
+  const STOP = new Set("the and for are was how who what why you your can with this that from have does did not when where which".split(" "));
+  const terms = (query.toLowerCase().match(/\w{3,}/g) || []).filter((t, i, a) => a.indexOf(t) === i && !STOP.has(t));
   let html = esc(tidy(text));
   if (terms.length) html = html.replace(new RegExp("\\b(" + terms.join("|") + ")\\b", "gi"), "<mark>$1</mark>");
   return html;
+}
+function inlineMd(html) {
+  return html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`\n]+)`/g, "<code>$1</code>");
+}
+function answerHtml(d) {
+  if (d.answer) {
+    const body = inlineMd(esc(d.answer.text)).replace(/\[(\d+)\]/g, (m, n) =>
+      +n >= 1 && +n <= d.answer.sources ? `<a href="#src-${n}">[${n}]</a>` : m);
+    return `<section class="answer" aria-label="Answer"><div class="body">${body}</div>
+      <p class="by">${d.answer.refused ? "The documents don't seem to answer this question." : d.answer.cited.length ? `Written by ${esc(d.answer.model)} from the sources below${d.answer.cached ? " (saved earlier answer)" : ""}.` : "This answer cites no sources, so check it against the sources below."}</p></section>`;
+  }
+  return d.answer_error ? `<p class="empty">No written answer: ${esc(d.answer_error)} The sources are below.</p>` : "";
 }
 function verdict(c, mode) {
   if (!c) return mode === "hybrid" ? "" : `<p class="empty">Confidence needs both search methods. Switch to Hybrid to see it.</p>`;
@@ -97,13 +116,13 @@ $("f").addEventListener("submit", async e => {
   e.preventDefault();
   const query = $("q").value.trim(), mode = $("mode").value;
   if (!query) return;
-  $("status").textContent = "Searching...";
+  $("status").textContent = "Searching and writing an answer...";
   try {
-    const d = await api("/search", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query, k: 5, mode})});
+    const d = await api("/ask", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query, k: 5, mode})});
     $("status").textContent = `${d.results.length} sources in ${Math.round(d.trace.total_ms)} ms`;
-    const items = d.results.map((r, i) => `<li class="hit"><span class="rk">${i + 1}</span><div><div class="src"><b>${esc(r.source)}</b><span>characters ${r.start} to ${r.end}</span></div>
+    const items = d.results.map((r, i) => `<li class="hit" id="src-${i + 1}"><span class="rk">${i + 1}</span><div><div class="src"><b>${esc(r.source)}</b><span>characters ${r.start} to ${r.end}</span></div>
       <div class="txt">${highlight(r.text, query)}</div></div></li>`).join("");
-    $("out").innerHTML = verdict(d.confidence, mode) + (items ? `<ol>${items}</ol>` : `<p class="empty">No sources matched. Try different words, or add a document.</p>`);
+    $("out").innerHTML = answerHtml(d) + verdict(d.confidence, mode) + (items ? `<ol>${items}</ol>` : `<p class="empty">No sources matched. Try different words, or add a document.</p>`);
   } catch (err) {
     $("status").textContent = "";
     $("out").innerHTML = `<p class="empty">Search failed: ${esc(err.message)}. Check that the server is running and a document has been added.</p>`;

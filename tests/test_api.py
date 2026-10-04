@@ -9,7 +9,7 @@ def client(pipeline):
 
 
 def test_health(pipeline):
-    assert client(pipeline).get("/health").json() == {"status": "ok"}
+    assert client(pipeline).get("/health").json() == {"status": "ok", "llm_configured": False}
 
 
 def test_ingest_then_search_and_idempotent_upload(pipeline):
@@ -34,4 +34,31 @@ def test_rejects_bad_input(pipeline):
 def test_root_serves_the_search_page(pipeline):
     r = client(pipeline).get("/")
     assert r.status_code == 200 and "text/html" in r.headers["content-type"]
-    assert "Ask your documents" in r.text and "/search" in r.text
+    assert "Ask your documents" in r.text and "/ask" in r.text
+
+
+def test_ask_returns_sources_and_a_cited_answer(loaded):
+    from backend.llm import FakeLLM
+
+    loaded.llm = FakeLLM(["RRF fuses rankings [1]."])
+    c = client(loaded)
+    c.post("/ingest", files={"file": ("a.txt", DOC_A.encode())})
+    out = c.post("/ask", json={"query": "reciprocal rank fusion", "k": 3}).json()
+    assert out["answer"]["cited"] == [1] and out["answer_error"] is None
+    assert out["results"] and out["confidence"]["bucket"] in {"Low", "Medium", "High"}
+    assert c.get("/health").json()["llm_configured"] is True
+
+
+def test_ask_without_llm_degrades_to_sources(loaded):
+    out = client(loaded).post("/ask", json={"query": "fusion"}).json()
+    assert out["answer"] is None and "LLM_API_KEY" in out["answer_error"] and out["results"]
+
+
+def test_ask_survives_a_failing_llm_and_validates_input(loaded):
+    from backend.llm import FakeLLM, LLMError
+
+    loaded.llm = FakeLLM(error=LLMError("HTTP 401 bad key"))
+    c = client(loaded)
+    out = c.post("/ask", json={"query": "fusion"}).json()
+    assert out["answer"] is None and "401" in out["answer_error"] and out["results"]
+    assert c.post("/ask", json={"query": "x", "mode": "nope"}).status_code == 422
