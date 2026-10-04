@@ -41,6 +41,9 @@ class RetrievalResult:
     chunks: dict[str, Chunk] = field(default_factory=dict)
     confidence: object | None = None  # ConfidenceResult, set when both lists exist
     trace: dict = field(default_factory=dict)
+    rewritten_query: str | None = None  # standalone query used for search, if rewritten
+    expansions: list[str] = field(default_factory=list)  # extra queries searched
+    notes: list[str] = field(default_factory=list)  # degraded steps, shown to the user
 
 
 class Embedder(Protocol):

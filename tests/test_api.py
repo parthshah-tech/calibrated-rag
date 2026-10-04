@@ -62,3 +62,32 @@ def test_ask_survives_a_failing_llm_and_validates_input(loaded):
     out = c.post("/ask", json={"query": "fusion"}).json()
     assert out["answer"] is None and "401" in out["answer_error"] and out["results"]
     assert c.post("/ask", json={"query": "x", "mode": "nope"}).status_code == 422
+
+
+def test_ask_accepts_history_and_expand(loaded):
+    from backend.llm import FakeLLM
+
+    loaded.llm = FakeLLM(
+        ["XJ-4471 product code", "sourdough bread flour", "It means the pump failed [1]."]
+    )
+    hist = [
+        {"role": "user", "content": "error codes?"},
+        {"role": "assistant", "content": "XJ-4471"},
+    ]
+    out = (
+        client(loaded)
+        .post("/ask", json={"query": "and that one?", "history": hist, "expand": 1})
+        .json()
+    )
+    assert out["rewritten_query"] == "XJ-4471 product code"
+    assert out["expansions"] == ["sourdough bread flour"] and out["notes"] == []
+    assert out["answer"]["cited"] == [1]
+
+
+def test_ask_validates_history_and_expand(loaded):
+    c = client(loaded)
+    bad_role = {"query": "x", "history": [{"role": "system", "content": "hi"}]}
+    assert c.post("/ask", json=bad_role).status_code == 422
+    assert c.post("/ask", json={"query": "x", "expand": 9}).status_code == 422
+    too_long = {"query": "x", "history": [{"role": "user", "content": "a" * 5000}]}
+    assert c.post("/ask", json=too_long).status_code == 422

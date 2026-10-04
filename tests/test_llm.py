@@ -94,10 +94,31 @@ def test_auth_errors_are_not_retried(server):
     assert len(Stub.seen) == 1
 
 
-def test_empty_text_explains_reasoning_budget(server):
-    Stub.script = [ok("", finish="length")]
+def test_empty_text_after_the_retry_explains_the_reasoning_budget(server):
+    Stub.script = [ok("", finish="length"), ok("", finish="length")]
     with pytest.raises(LLMError, match="reasoning"):
+        client(server).complete([{"role": "user", "content": "x"}], max_tokens=100)
+    assert [r["body"]["max_tokens"] for r in Stub.seen] == [100, 300]
+
+
+def test_budget_exhausted_by_reasoning_is_retried_with_triple_the_budget(server):
+    Stub.script = [ok("", finish="length"), ok("rewritten query")]
+    r = client(server).complete([{"role": "user", "content": "x"}], max_tokens=300)
+    assert r.text == "rewritten query"
+    assert [q["body"]["max_tokens"] for q in Stub.seen] == [300, 900]
+
+
+def test_retry_budget_is_capped(server):
+    Stub.script = [ok("", finish="length"), ok("fine")]
+    client(server).complete([{"role": "user", "content": "x"}], max_tokens=2000)
+    assert Stub.seen[1]["body"]["max_tokens"] == 3000
+
+
+def test_empty_text_that_is_not_a_length_cutoff_is_not_retried(server):
+    Stub.script = [ok("", finish="stop")]
+    with pytest.raises(LLMError, match="no text"):
         client(server).complete([{"role": "user", "content": "x"}])
+    assert len(Stub.seen) == 1
 
 
 def test_unreachable_server_raises_llm_error():

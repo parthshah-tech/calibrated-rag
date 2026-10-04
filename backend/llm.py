@@ -24,6 +24,10 @@ class LLMError(RuntimeError):
     """Any failure to get text from the model. Messages never contain the API key."""
 
 
+class _Truncated(LLMError):
+    """The model spent its whole output budget (usually on reasoning) before writing any text."""
+
+
 @dataclass(frozen=True)
 class LLMResult:
     text: str
@@ -62,6 +66,14 @@ class OpenAICompatClient:
         self._key = api_key
 
     def complete(self, messages, *, temperature: float = 0.0, max_tokens: int = 600) -> LLMResult:
+        """Reasoning models can burn the entire budget thinking and return no text. When that
+        happens, retry once with three times the budget (capped) instead of failing."""
+        try:
+            return self._complete_once(messages, temperature, max_tokens)
+        except _Truncated:
+            return self._complete_once(messages, temperature, min(max_tokens * 3, 3000))
+
+    def _complete_once(self, messages, temperature: float, max_tokens: int) -> LLMResult:
         body = {
             "model": self.model,
             "messages": messages,
@@ -102,13 +114,12 @@ class OpenAICompatClient:
         except (KeyError, IndexError, TypeError) as e:
             raise LLMError("LLM response had an unexpected shape") from e
         if not text:
-            hint = (
-                " (the output budget was used up by reasoning; raise max_tokens or lower "
-                "LLM_REASONING_EFFORT)"
-                if choice.get("finish_reason") == "length"
-                else ""
-            )
-            raise LLMError("LLM returned no text" + hint)
+            if choice.get("finish_reason") == "length":
+                raise _Truncated(
+                    "LLM returned no text (the output budget was used up by reasoning, even "
+                    "after one retry with a larger budget; try LLM_REASONING_EFFORT=low)"
+                )
+            raise LLMError("LLM returned no text")
         return LLMResult(text, payload.get("model", self.model))
 
 

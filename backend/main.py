@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -17,10 +18,17 @@ from .pipeline import MODES, RAGPipeline
 from .vector_store import ChromaVectorStore
 
 
+class Turn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1)
     k: int = Field(default=5, ge=1, le=50)
     mode: str = "hybrid"
+    history: list[Turn] = Field(default_factory=list, max_length=20)  # used by /ask
+    expand: int = Field(default=0, ge=0, le=5)  # extra queries to search, used by /ask
 
 
 def build_pipeline(settings: Settings | None = None) -> RAGPipeline:
@@ -76,6 +84,9 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
                 for h in r.fused
                 if h.chunk_id in r.chunks
             ],
+            "rewritten_query": r.rewritten_query,
+            "expansions": r.expansions,
+            "notes": r.notes,
             "trace": r.trace,
         }
 
@@ -91,7 +102,8 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
     @app.post("/ask")
     def ask(req: SearchRequest):
         check_mode(req)
-        r, ans, err = get().answer(req.query, req.k, req.mode)
+        history = [t.model_dump() for t in req.history]
+        r, ans, err = get().answer(req.query, req.k, req.mode, history, req.expand)
         return {**payload(r), "answer": asdict(ans) if ans else None, "answer_error": err}
 
     return app

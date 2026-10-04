@@ -37,6 +37,8 @@ li.hit{display:grid;grid-template-columns:2rem 1fr;padding:1.1rem 0;border-top:1
 .txt{font:1.02rem/1.65 "Iowan Old Style","Palatino Linotype",Georgia,serif;white-space:pre-wrap;overflow-wrap:anywhere;max-width:40rem}
 mark{background:transparent;color:inherit;font-weight:700;text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:3px}
 .empty{color:var(--muted);padding:1.5rem 0}
+.opt{display:flex;align-items:center;gap:.4rem;color:var(--muted);font-size:.9rem}
+.how{color:var(--muted);font-size:.9rem;margin:1.4rem 0 0;max-width:40rem}
 .answer{margin:2rem 0 0;max-width:40rem}
 .answer .body{font:1.12rem/1.7 "Iowan Old Style","Palatino Linotype",Georgia,serif;white-space:pre-wrap}
 .answer code{font:.92em ui-monospace,Menlo,Consolas,monospace}
@@ -55,16 +57,18 @@ li.hit:target{background:color-mix(in srgb,var(--mid) 12%,transparent)}
       <option value="hybrid">Hybrid</option><option value="dense">Meaning only</option><option value="bm25">Keywords only</option>
     </select>
     <button class="go" type="submit">Search</button>
+    <label class="opt"><input type="checkbox" id="broad"> Broaden search</label>
   </form>
   <div class="tools">
     <span id="status" role="status" aria-live="polite"></span>
-    <span><button class="linkish" type="button" id="add">Add a document</button>
+    <span><button class="linkish" type="button" id="reset" hidden>New conversation</button> <button class="linkish" type="button" id="add">Add a document</button>
     <input id="file" type="file" accept=".txt,.md,.pdf,.docx" hidden></span>
   </div>
   <div id="out"></div>
 </main>
 <script>
 const $ = id => document.getElementById(id);
+let convo = [];
 const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const MEANING = {
   Low: ["Low confidence", "The two search methods disagree about what matches. Check the sources before relying on this."],
@@ -82,6 +86,13 @@ function highlight(text, query) {
   let html = esc(tidy(text));
   if (terms.length) html = html.replace(new RegExp("\\b(" + terms.join("|") + ")\\b", "gi"), "<mark>$1</mark>");
   return html;
+}
+function howHtml(d) {
+  const bits = [];
+  if (d.rewritten_query) bits.push(`Searched for: ${esc(d.rewritten_query)}`);
+  if (d.expansions && d.expansions.length) bits.push(`Also searched: ${d.expansions.map(esc).join("; ")}`);
+  (d.notes || []).forEach(n => bits.push(esc(n)));
+  return bits.length ? `<p class="how">${bits.join("<br>")}</p>` : "";
 }
 function inlineMd(html) {
   return html.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`\n]+)`/g, "<code>$1</code>");
@@ -118,15 +129,25 @@ $("f").addEventListener("submit", async e => {
   if (!query) return;
   $("status").textContent = "Searching and writing an answer...";
   try {
-    const d = await api("/ask", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query, k: 5, mode})});
+    const d = await api("/ask", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({query, k: 5, mode, history: convo.slice(-6), expand: $("broad").checked ? 3 : 0})});
     $("status").textContent = `${d.results.length} sources in ${Math.round(d.trace.total_ms)} ms`;
     const items = d.results.map((r, i) => `<li class="hit" id="src-${i + 1}"><span class="rk">${i + 1}</span><div><div class="src"><b>${esc(r.source)}</b><span>characters ${r.start} to ${r.end}</span></div>
       <div class="txt">${highlight(r.text, query)}</div></div></li>`).join("");
-    $("out").innerHTML = answerHtml(d) + verdict(d.confidence, mode) + (items ? `<ol>${items}</ol>` : `<p class="empty">No sources matched. Try different words, or add a document.</p>`);
+    convo.push({role: "user", content: query});
+    if (d.answer && !d.answer.refused) convo.push({role: "assistant", content: d.answer.text});
+    $("reset").hidden = false;
+    $("out").innerHTML = howHtml(d) + answerHtml(d) + verdict(d.confidence, mode) + (items ? `<ol>${items}</ol>` : `<p class="empty">No sources matched. Try different words, or add a document.</p>`);
   } catch (err) {
     $("status").textContent = "";
     $("out").innerHTML = `<p class="empty">Search failed: ${esc(err.message)}. Check that the server is running and a document has been added.</p>`;
   }
+});
+$("reset").addEventListener("click", () => {
+  convo = [];
+  $("out").innerHTML = "";
+  $("status").textContent = "Started a new conversation.";
+  $("reset").hidden = true;
+  $("q").focus();
 });
 $("add").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", async () => {
