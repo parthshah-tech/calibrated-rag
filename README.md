@@ -2,10 +2,10 @@
 
 [![ci](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml)
 
-A hybrid retrieval-augmented generation pipeline (dense embeddings + BM25, fused with
-Reciprocal Rank Fusion, cross-encoder reranking, multi-query expansion, history-aware
-rewriting) that **knows when it is unsure**. The disagreement between the dense and BM25
-rankings is turned into a calibrated confidence signal, which is then used three ways:
+A hybrid retrieval pipeline (dense embeddings + BM25, fused with Reciprocal Rank Fusion)
+that **knows when it is unsure**. The disagreement between the dense and BM25 rankings is
+turned into a confidence signal, validated on public benchmarks (see Results). The design
+uses that signal three ways; the first is built, the others are planned (see Status):
 
 1. **Shown to users** as a Low / Medium / High badge (the subject of the HCI study).
 2. **Used by the system** to route each query through a cheaper or more thorough pipeline.
@@ -25,7 +25,8 @@ rankings is turned into a calibrated confidence signal, which is then used three
 | Ingestion (content-hashed, idempotent), chunking (fixed, recursive), dense (Chroma) + BM25 + RRF, tracing, upload/search API, CI | built, Phase 0 |
 | `confidence.py` (overlap, RBO, tau-on-intersection) wired into retrieval | built (thresholds are placeholders) |
 | Eval harness, BEIR runner, signal validation, signal studies | built, Phase 1 |
-| Reranking, multi-query, history-aware rewrite, badge UI | planned, Phase 2 |
+| Search page with sources and confidence verdict | built |
+| Reranking, multi-query, history-aware rewrite, generation | planned, Phase 2 |
 | Verified reformulations, study mode, export | planned, Phase 3 |
 | Confidence-gated routing, Retrieval Inspector, semantic chunking, full ablation | planned, Phase 4 |
 
@@ -82,6 +83,10 @@ on any new corpus.
 
 ## Architecture
 
+Target design. Built so far: ingestion, chunking, hybrid retrieval, the
+confidence signal, tracing and evaluation. The router, reranking, rewriting, generation and
+study mode are planned.
+
 ```
 Upload → Ingestion (PDF/DOCX/TXT/MD, content-hashed, idempotent)
        → Chunking (fixed | recursive | semantic)
@@ -131,19 +136,19 @@ Metrics implemented (pluggable, and compared against each other in validation):
 | Kendall's τ on the intersection | The metric named in the course proposal; ill-defined when lists barely overlap, so it is reported with the intersection size |
 
 Bucketing (Low / Medium / High) uses thresholds fit on a **dev split** of the eval set
-and reported on a **held-out split**.
+and reported on a **held-out split**. The running pipeline still uses placeholder cutoffs
+until they are fit on the study corpus.
 
 ### Validation (before any user study)
 
 `eval/validate_signal.py` answers: *does the badge mean anything?*
 
 - Retrieval success label: gold chunk in the final top-k.
-- Reports success rate per bucket, AUROC of score vs success, and a reliability diagram.
-- Calibration: isotonic regression (cross-validated), reported as ECE before and after.
-- Metric comparison: overlap vs RBO vs τ, optionally combined with top-1 score margin and
-  reranker score spread.
-- Unanswerable questions are evaluated separately (correct behaviour = low confidence /
-  abstain).
+- Reports success rate per bucket and AUROC of score vs success.
+- Calibration: isotonic regression (cross-validated), reported as ECE and Brier skill.
+- Metric comparison: overlap vs RBO vs τ (`eval/signal_studies.py`).
+- Unanswerable questions: `eval/eval_harness.py` reports their confidence-bucket counts
+  separately.
 
 If the signal does not predict retrieval success, that is a finding, and it changes what
 the user study can claim.
@@ -151,6 +156,8 @@ the user study can claim.
 ---
 
 ## Adaptive routing
+
+*Planned, not built yet.*
 
 `backend/router.py` maps confidence bucket to pipeline cost:
 
@@ -165,6 +172,8 @@ p50 latency**. The harness reports both, with bootstrap CIs.
 
 ## Verified reformulations
 
+*Planned, not built yet.*
+
 `backend/reformulation.py` — when confidence is Medium/Low, each multi-query paraphrase
 is run through dense + BM25, and its agreement score is computed. Only paraphrases whose
 score beats the original by a margin are surfaced (max 3), each with its own bucket. If
@@ -174,6 +183,8 @@ raw LLM output.
 ---
 
 ## Retrieval Inspector
+
+*Planned, not built yet.*
 
 A developer/demo view (disabled in study mode) showing:
 
@@ -187,6 +198,8 @@ exact source span and highlights it.
 ---
 
 ## Study mode (for the HCI study)
+
+*Planned, not built yet.*
 
 Enabled with `STUDY_MODE=1`. Designed so the survey/analysis team never needs code changes.
 
@@ -209,7 +222,7 @@ Enabled with `STUDY_MODE=1`. Designed so the survey/analysis team never needs co
   per-participant, per-question CSV (no free-text identifiers). Correctness is joined from
   the frozen ground-truth question set, not labelled by hand.
 
-Column contract for the export is versioned in `docs/data_contract.md`.
+Column contract for the export is versioned in `docs/data_contract.md` (planned).
 
 ---
 
@@ -223,10 +236,10 @@ uv sync --group dev --extra models   # runtime + dev deps; `models` adds sentenc
 cp .env.example .env
 # set GROQ_API_KEY (https://console.groq.com)
 
-uv run uvicorn backend.main:app --reload
+uv run uvicorn backend.main:app --reload --env-file .env
 ```
 
-Phase 0 exposes the API (frontend arrives in Phase 2):
+Open http://localhost:8000/ for the search page, or use the API directly:
 
 ```bash
 curl -F file=@notes.md http://localhost:8000/ingest
@@ -237,8 +250,9 @@ curl -X POST localhost:8000/search -H 'content-type: application/json' \
 `mode` is `dense`, `bm25` or `hybrid`; hybrid responses include the confidence bucket and
 a per-stage timing trace. API docs are served at `http://localhost:8000/docs`.
 
-Key `.env` settings: `CHUNK_STRATEGY` (fixed | recursive | semantic), `CONFIDENCE_METRIC`
-(overlap | rbo | tau), `ROUTING` (on | off), `STUDY_MODE` (0 | 1).
+Key `.env` settings: `CHUNK_STRATEGY` (fixed | recursive; semantic is planned),
+`CONFIDENCE_METRIC` (overlap | rbo | tau), `CONFIDENCE_K`, `EMBEDDER`. `ROUTING` and
+`STUDY_MODE` are reserved for later phases.
 
 ## Verify
 
@@ -249,10 +263,9 @@ uv run pytest -q
 ```
 
 Unit tests cover the pure parts: chunking, BM25 ranking, RRF math, confidence metrics,
-bucketing, router decisions, condition assignment. Model-backed stages (embedder,
+bucketing, evaluation metrics and statistics. Model-backed stages (embedder,
 reranker, LLM calls) are exercised by the eval harness on a real corpus. Pre-commit runs
-the ruff checks; CI (`.github/workflows/ci.yml`) re-runs lint, format check and tests, and
-runs a small fixed eval as a regression gate.
+the ruff checks; CI (`.github/workflows/ci.yml`) re-runs lint, format check and tests.
 
 ## Docker
 
@@ -273,7 +286,6 @@ downloads `all-MiniLM-L6-v2` and `cross-encoder/ms-marco-MiniLM-L-6-v2` from Hug
 # write eval/sample_qa.json (schema below)
 
 uv run python -m eval.eval_harness --corpus ./eval/corpus --qa ./eval/sample_qa.json
-uv run python -m eval.validate_signal --corpus ./eval/corpus --qa ./eval/sample_qa.json
 ```
 
 `eval/sample_qa.json` entry:
@@ -293,20 +305,23 @@ uv run python -m eval.validate_signal --corpus ./eval/corpus --qa ./eval/sample_
 Public-benchmark and scale runs live in `benchmarks/`:
 
 ```bash
-uv run python -m benchmarks.beir_eval --datasets scifact nfcorpus fiqa   # nDCG@10, Recall@100
-uv run python -m benchmarks.scale --chunks 1000 10000 100000              # latency vs corpus size
-uv run python -m benchmarks.load --clients 1 8 32                         # QPS, p50/p95
+uv run python -m benchmarks.beir_eval --datasets scifact nfcorpus   # nDCG@10, Recall@100
+uv run python -m eval.validate_signal --results benchmarks/results/beir.json
+uv run python -m eval.signal_studies --results benchmarks/results/beir.json
+# planned: benchmarks.scale (latency vs corpus size), benchmarks.load (QPS, p50/p95)
 ```
 
-The harness sweeps chunking strategy × retrieval configuration (dense-only, BM25-only,
-hybrid, hybrid+rerank, hybrid+rerank+multi-query, routed) and reports Recall@k, MRR and
-p50/p95 latency to `eval_results.json`. Results include bootstrap 95% CIs and paired
+The custom-corpus harness sweeps chunking strategy (fixed, recursive) × retrieval mode
+(dense, BM25, hybrid) and reports hit@5, MRR and latency to `eval_results.json`. Results include bootstrap 95% CIs and paired
 bootstrap comparisons between configurations. Seeds are fixed; runs are reproducible from
 one command.
 
 ---
 
 ## Repository layout
+
+Files for planned phases (router, reformulation, query expansion, history-aware
+rewrite, reranker, generation, study mode, scale and load benchmarks) do not exist yet.
 
 ```
 backend/
@@ -328,9 +343,8 @@ docs/  data_contract.md  complexity.md
 
 ## Complexity
 
-Per-stage time and space analysis, the end-to-end query cost model, and a
-predicted-vs-measured table (log-log scaling slopes from `benchmarks/scale.py`) are in
-[`docs/complexity.md`](docs/complexity.md). Headline: dense retrieval scales sublinearly
+Per-stage time and space analysis and the end-to-end query cost model are in
+[`docs/complexity.md`](docs/complexity.md). Predicted, not yet measured: dense retrieval scales sublinearly
 (HNSW), BM25 via `rank_bm25` scales linearly in corpus size, and LLM stages are constant
 in corpus size, which is what the confidence-gated router exploits.
 
