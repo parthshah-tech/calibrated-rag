@@ -41,7 +41,7 @@ of minutes; leave off `--rerank` to skip it. Each run rewrites `beir.json`.
 - Bucket cutoffs are tertiles fit per group on a random dev half and reported on the other half.
   They differ by dataset and must not be reused on another corpus.
 - Retrieval and signal numbers are identical across reruns. Latency is not: it varies between runs,
-  so only the large reranker gap (roughly 0.1 s against 2.8 s median on this machine) should be
+  so only the large reranker gap (roughly 0.1 s against 3 s median on this machine) should be
   read as meaningful.
 - The tau-based score is Kendall's tau on the shared items, rescaled to [0, 1] and weighted by the
   shared fraction.

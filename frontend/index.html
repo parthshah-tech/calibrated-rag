@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ask your documents</title>
 <style>
-:root{--bg:#f4f6f8;--surf:#ffffff;--ink:#1c2733;--muted:#5b6876;--line:#d5dbe2;--acc:#1d7a5a;--low:#b4530a;--mid:#2c6a99;--high:#1d7a5a;--serif:"Iowan Old Style","Palatino Linotype",Georgia,serif}
-@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surf:#141a22;--ink:#e6ebf0;--muted:#97a4b1;--line:#27313c;--acc:#3ecf8e;--low:#e08a3c;--mid:#6aa8d6;--high:#4fb88f}}
+:root{--bg:#f4f6f8;--surf:#ffffff;--ink:#1c2733;--muted:#5b6876;--line:#d5dbe2;--acc:#5b4bd5;--accbtn:#5b4bd5;--low:#b4530a;--mid:#2c6a99;--high:#1d7a5a;--serif:"Iowan Old Style","Palatino Linotype",Georgia,serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surf:#141a22;--ink:#e6ebf0;--muted:#97a4b1;--line:#27313c;--acc:#9a8cf7;--accbtn:#6252e0;--low:#e08a3c;--mid:#6aa8d6;--high:#4fb88f}}
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
@@ -53,7 +53,7 @@ textarea{width:100%;border:0;resize:none;background:transparent;outline:none;min
 .opts select{border:1px solid var(--line);border-radius:6px;background:transparent;padding:.25rem .4rem}
 .opts label{display:flex;gap:.3rem;align-items:center}
 #status{flex:1;min-width:6rem}
-.send{border:0;border-radius:999px;background:var(--acc);color:#fff;padding:.45rem 1rem;font-weight:600;cursor:pointer}
+.send{border:0;border-radius:999px;background:var(--accbtn);color:#fff;padding:.45rem 1rem;font-weight:600;cursor:pointer}
 .hint{color:var(--muted);font-size:.85rem;margin:.3rem 0 1.2rem}
 #docs{list-style:none;margin:0 0 .4rem;padding:0}
 #docs li{display:flex;gap:.55rem;align-items:flex-start;padding:.4rem 0}
@@ -271,7 +271,7 @@ $("file").addEventListener("change", async () => {
   let t = 0;
   function draw() {
     if ($("hero").hidden && !still) { setTimeout(draw, 500); return; }
-    const acc = getComputedStyle(document.documentElement).getPropertyValue("--acc").trim() || "#3ecf8e";
+    const acc = getComputedStyle(document.documentElement).getPropertyValue("--acc").trim() || "#9a8cf7";
     g.clearRect(0, 0, 480, 480); g.strokeStyle = acc; g.lineWidth = 1.5;
     [[236, .35], [212, .6]].forEach(([r, a]) => { g.globalAlpha = a; g.beginPath(); g.arc(240, 240, r, 0, 7); g.stroke(); });
     const ca = Math.cos(t), sa = Math.sin(t), cb = Math.cos(t * .6), sb = Math.sin(t * .6);
