@@ -31,6 +31,7 @@ class SearchRequest(BaseModel):
     history: list[Turn] = Field(default_factory=list, max_length=20)  # used by /ask
     expand: int = Field(default=0, ge=0, le=5)  # extra queries to search, used by /ask
     rerank: bool = False  # re-score the top candidates with the cross-encoder
+    doc_ids: list[str] | None = Field(default=None, max_length=500)  # None means all documents
 
 
 def build_pipeline(settings: Settings | None = None) -> RAGPipeline:
@@ -67,6 +68,10 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
         p = holder["p"]
         llm = p.llm is not None if p is not None else bool(Settings.from_env().llm_api_key)
         return {"status": "ok", "llm_configured": llm}
+
+    @app.get("/documents")
+    def documents():
+        return get().store.documents()
 
     @app.post("/ingest")
     async def ingest(file: UploadFile):
@@ -106,13 +111,16 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
     @app.post("/search")
     def search(req: SearchRequest):
         check_mode(req)
-        return payload(get().retrieve(req.query, req.k, req.mode, rerank=req.rerank))
+        r = get().retrieve(req.query, req.k, req.mode, rerank=req.rerank, doc_ids=req.doc_ids)
+        return payload(r)
 
     @app.post("/ask")
     def ask(req: SearchRequest):
         check_mode(req)
         history = [t.model_dump() for t in req.history]
-        r, ans, err = get().answer(req.query, req.k, req.mode, history, req.expand, req.rerank)
+        r, ans, err = get().answer(
+            req.query, req.k, req.mode, history, req.expand, req.rerank, req.doc_ids
+        )
         return {**payload(r), "answer": asdict(ans) if ans else None, "answer_error": err}
 
     return app

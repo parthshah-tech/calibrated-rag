@@ -46,18 +46,20 @@ class RAGPipeline:
     def ingest(self, filename: str, data: bytes) -> IngestResult:
         return self.ingestor.ingest(filename, data, on_added=self.bm25.add)
 
-    def _first_pass(self, tracer: Tracer, query: str, dense: bool, bm25: bool, label: str = ""):
+    def _first_pass(
+        self, tracer: Tracer, query: str, dense: bool, bm25: bool, label: str = "", doc_ids=None
+    ):
         """Dense and BM25 candidate lists for one query (in parallel when both are wanted)."""
         pool = self.settings.candidate_pool
 
         def run_dense():
             with tracer.span("dense" + label):
                 emb = self.embedder.embed([query])[0]
-                return self.store.query(emb, pool)
+                return self.store.query(emb, pool, doc_ids)
 
         def run_bm25():
             with tracer.span("bm25" + label):
-                return self.bm25.search(query, pool)
+                return self.bm25.search(query, pool, doc_ids)
 
         if dense and bm25 and self._pool:
             fd, fb = self._pool.submit(run_dense), self._pool.submit(run_bm25)
@@ -103,11 +105,13 @@ class RAGPipeline:
         history: list[dict] | None = None,
         expand: int = 0,
         rerank: bool = False,
+        doc_ids: list[str] | None = None,
     ) -> RetrievalResult:
         """history: earlier turns, used to rewrite a follow-up into a standalone query.
         expand: number of extra LLM-written queries to search too (hybrid mode only).
         Both need an LLM and degrade silently to plain retrieval if it is missing or fails.
         rerank: re-score the top candidates with the cross-encoder (degrades with a note).
+        doc_ids: search only these documents (None means all, an empty list means none).
         The confidence signal always uses the first-pass lists of the (rewritten) question."""
         if mode not in MODES:
             raise ValueError(f"mode must be one of {MODES}")
@@ -122,7 +126,9 @@ class RAGPipeline:
                 search_query, res.rewritten_query = rw.query, rw.query
 
         want_dense, want_bm25 = mode in ("dense", "hybrid"), mode in ("bm25", "hybrid")
-        res.dense, res.bm25 = self._first_pass(tracer, search_query, want_dense, want_bm25)
+        res.dense, res.bm25 = self._first_pass(
+            tracer, search_query, want_dense, want_bm25, doc_ids=doc_ids
+        )
 
         if want_dense and want_bm25:
             with tracer.span("confidence"):
@@ -139,7 +145,7 @@ class RAGPipeline:
                 self._llm_step(tracer, res, "expansion", ex)
                 res.expansions = ex.queries
                 for i, q in enumerate(ex.queries, start=1):
-                    d, b = self._first_pass(tracer, q, True, True, label=f"#{i}")
+                    d, b = self._first_pass(tracer, q, True, True, label=f"#{i}", doc_ids=doc_ids)
                     rankings += [[h.chunk_id for h in d], [h.chunk_id for h in b]]
             with tracer.span("rrf"):
                 ranked = rrf(rankings, k=self.settings.rrf_k)
@@ -162,10 +168,11 @@ class RAGPipeline:
         history: list[dict] | None = None,
         expand: int = 0,
         rerank: bool = False,
+        doc_ids: list[str] | None = None,
     ) -> tuple[RetrievalResult, Answer | None, str | None]:
         """Retrieve, then write a grounded answer. Retrieval always survives an LLM failure:
         the third item is an error message when no answer could be produced."""
-        res = self.retrieve(query, k, mode, history, expand, rerank)
+        res = self.retrieve(query, k, mode, history, expand, rerank, doc_ids)
         if self.llm is None:
             return res, None, "Generation is off: set LLM_API_KEY (or GROQ_API_KEY) in .env."
         chunks = [res.chunks[h.chunk_id] for h in res.fused if h.chunk_id in res.chunks]

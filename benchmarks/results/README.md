@@ -1,25 +1,49 @@
-# BEIR results (v1)
+# Benchmark results
 
-Reproduce:
+Raw per-query results and summaries for the retrieval and confidence-signal experiments reported in
+the main README.
 
-    uv run python -m benchmarks.beir_eval --datasets scifact nfcorpus
-    uv run python -m eval.validate_signal --results benchmarks/results/beir.json
+| File | Contents |
+|---|---|
+| `beir.json` | Per-query records for dense, BM25, hybrid and (when run with `--rerank`) hybrid plus cross-encoder, on the BEIR datasets run, with summaries and paired comparisons. |
+| `signal_validation.json` | Does the confidence score predict retrieval success? AUROC, success rate per bucket (held-out half), isotonic calibration. |
+| `signal_studies.json` | Overlap vs RBO vs a tau-based score, and whether cutoffs and calibration transfer between datasets. |
 
-Run on 2026-10-03, commit 5c2a204, CPU Intel(R) Core(TM) Ultra 5 125H, 7.6Gi RAM, no GPU, WSL2.
+## Reproduce
 
-Setup: all-MiniLM-L6-v2 embeddings with exact (brute-force) cosine search; BM25 is rank_bm25 BM25Okapi with a plain word tokenizer (no stemming, no stopword removal); RRF k=60; confidence is RBO over the top 10 of each list, computed before fusion.
+```bash
+uv run python -m benchmarks.beir_eval --datasets scifact nfcorpus --rerank
+uv run python -m eval.validate_signal --results benchmarks/results/beir.json
+uv run python -m eval.signal_studies --results benchmarks/results/beir.json
+```
 
-Caveats:
-- Latency comparisons across modes are NOT valid yet (warm-up and order effects). Only BM25 timings are reliable.
-- "success" means at least one relevant document is in the top 10. It measures retrieval, not answer correctness.
-- Bucket thresholds are tertile cutoffs fit per group on a random dev half. They differ by dataset and must not be reused on another corpus.
+The first run downloads the datasets from the public BEIR site into `data/beir/` and embeds the
+documents once (cached on disk afterwards). Reranking 50 candidates per query on a CPU takes tens
+of minutes; leave off `--rerank` to skip it. Each run rewrites `beir.json`.
 
-## Signal studies
+## Setup behind the numbers
 
-    uv run python -m eval.signal_studies --results benchmarks/results/beir.json
+- Environment: WSL2 (Ubuntu 24.04) on a laptop CPU with 16 GB RAM and no GPU.
+- Embeddings: `all-MiniLM-L6-v2` with exact (brute-force) cosine search, not the approximate index
+  the app uses.
+- BM25: `rank_bm25` BM25Okapi with a plain word tokenizer (no stemming, no stopword removal).
+- Fusion: Reciprocal Rank Fusion with k = 60; 100 candidates per retriever.
+- Confidence: rank-biased overlap of the top 10 of each list, computed before fusion.
+- Reranker: `cross-encoder/ms-marco-MiniLM-L-6-v2` over the top 50 fused candidates; the rest of the
+  ranking keeps its fused order.
+- Intervals: percentile bootstrap, 2,000 resamples, fixed seed. Comparisons between configurations
+  are paired bootstraps over the same queries.
 
-Compares overlap, RBO and a tau-based score (AUROC with paired bootstrap differences) and tests
-whether cutoffs and calibration fit on one dataset transfer to the other. The tau score is
-Kendall's tau on shared items, rescaled to [0, 1] and weighted by the shared fraction.
-Transfer Brier skill is reported against both the training set's base rate and the test set's
-own base rate; use the second, which does not flatter a transfer between different base rates.
+## Notes on reading them
+
+- "Success" means at least one relevant document is in the top 10. It measures retrieval, not
+  whether a generated answer is correct.
+- Bucket cutoffs are tertiles fit per group on a random dev half and reported on the other half.
+  They differ by dataset and must not be reused on another corpus.
+- Retrieval and signal numbers are identical across reruns. Latency is not: it varies between runs,
+  so only the large reranker gap (roughly 0.1 s against 2.8 s median on this machine) should be
+  read as meaningful.
+- The tau-based score is Kendall's tau on the shared items, rescaled to [0, 1] and weighted by the
+  shared fraction.
+- Transfer Brier skill is reported against both the training set's base rate and the test set's own
+  base rate; the second is the fairer one when base rates differ.
