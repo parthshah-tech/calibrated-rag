@@ -137,10 +137,11 @@ shared items, rescaled to [0, 1] and weighted by the shared fraction.
 success still rises from Low to High (58%, 86%, 92% on NFCorpus using SciFact's cutoffs; 48%, 79%,
 94% in reverse). Bucket sizes do not: under SciFact's cutoffs 55% of NFCorpus queries fall in Low.
 
-**Does the cross-encoder help?** On SciFact, reranking the top 50 of the hybrid results gave nDCG@10
-0.695 [0.648, 0.739] against 0.682, a difference of +0.013 [-0.016, +0.043], which is not
-significant. It raised median retrieval time from about 0.1 s to about 2.8 s on a laptop CPU, so it
-is off by default. Reranking was evaluated on SciFact only.
+**Does the cross-encoder help?** Reranking the top 50 of the hybrid results gave no significant
+gain on either dataset: nDCG@10 0.695 against 0.682 on SciFact (+0.013, 95% CI [-0.016, +0.043])
+and 0.355 against 0.342 on NFCorpus (+0.013, [-0.000, +0.026]). The NFCorpus interval just
+reaches zero, so a small gain is possible but not established. Reranking raised the median
+retrieval time from roughly 0.1 s to roughly 3 s on a laptop CPU, so it is off by default.
 
 ## Evaluation
 
@@ -192,7 +193,7 @@ tests/
   overlap, and with a single passage BM25 returns nothing.
 - **BM25 is rebuilt on every upload and scores every passage per query** (`rank_bm25`). It is fine
   for hundreds of documents, not for very large collections.
-- **The cross-encoder did not help on SciFact** and is slow on a CPU.
+- **The cross-encoder gave no significant gain** on either dataset and takes about 3 s per query on a CPU.
 - **Single user, no authentication.** Chats live in the browser's local storage. The app is meant
   to run on your own machine.
 - **Benchmark latency varies between runs** and is not reported as a finding.
