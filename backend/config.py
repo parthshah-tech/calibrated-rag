@@ -22,7 +22,6 @@ class Settings:
     confidence_k: int = 10  # depth of the top-k lists the signal compares; independent of result k
     candidate_pool: int = 50
     rrf_k: int = 60
-    study_mode: bool = False
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_pool: int = 20  # how many top candidates the cross-encoder re-scores
     # LLM (any OpenAI-compatible endpoint). The key is never printed: repr=False.
@@ -45,7 +44,6 @@ class Settings:
             confidence_k=_int("CONFIDENCE_K", cls.confidence_k),
             candidate_pool=_int("CANDIDATE_POOL", cls.candidate_pool),
             rrf_k=_int("RRF_K", cls.rrf_k),
-            study_mode=e.get("STUDY_MODE", "0") == "1",
             rerank_model=e.get("RERANK_MODEL", cls.rerank_model),
             rerank_pool=_int("RERANK_POOL", cls.rerank_pool),
             llm_base_url=e.get("LLM_BASE_URL", cls.llm_base_url),

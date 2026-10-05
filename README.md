@@ -1,44 +1,110 @@
-# RAG Project — Confidence-Aware Hybrid Retrieval
+# calibrated-rag
 
 [![ci](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml)
 
-A hybrid retrieval pipeline (dense embeddings + BM25, fused with Reciprocal Rank Fusion)
-that **knows when it is unsure**. The disagreement between the dense and BM25 rankings is
-turned into a confidence signal, validated on public benchmarks (see Results). The design
-uses that signal three ways; the first is built, the others are planned (see Status):
+A document question-answering app that tells you how much to trust its retrieval. It searches your
+documents with two methods at once (embedding search and BM25 keyword search), merges them, and
+writes a cited answer. The two searches rarely agree when a question is poorly covered, so the app
+turns their **agreement into a Low / Medium / High confidence badge**. The badge is tested against
+public benchmarks, and the results are below.
 
-1. **Shown to users** as a Low / Medium / High badge (the subject of the HCI study).
-2. **Used by the system** to route each query through a cheaper or more thorough pipeline.
-3. **Used to suggest better phrasings**, verified by re-running retrieval, not guessed.
+It started as a personal project and became the system behind a group study in a Human-Computer
+Interaction course (BITS F364) on whether such a signal helps people trust answers appropriately.
+This repository contains the system and its evaluation, not the study.
 
+## What it does
 
-> Course context: BITS F364 (Human-Computer Interaction) group project,
-> *Calibrated Trust in RAG Answers via Retrieval Disagreement Signals*.
-> This repository is the system; the user study, analysis and paper live alongside it.
+- **Hybrid retrieval.** Dense search (all-MiniLM-L6-v2 embeddings in a persistent Chroma store) and
+  BM25 (`rank_bm25`), fused with Reciprocal Rank Fusion. Dense-only and keywords-only modes are
+  also available.
+- **Confidence signal.** Rank-biased overlap (RBO) of the top 10 of each search, computed before
+  fusion, shown as a badge. Top-k overlap and a Kendall-tau-based score are available through
+  `CONFIDENCE_METRIC`.
+- **Cited answers.** An LLM (any OpenAI-compatible endpoint, Groq by default) answers from the
+  retrieved passages only and cites them as `[1]`, `[2]`. If the passages don't contain the answer
+  it says so. Deterministic answers are cached on disk.
+- **Follow-up questions.** Earlier turns are used to rewrite a follow-up ("and who merges it?")
+  into a standalone search query.
+- **Broaden search.** Optionally asks the LLM for three differently-worded queries and merges all
+  results with RRF.
+- **Sharper ranking.** Optionally re-scores the top 20 candidates with a cross-encoder
+  (`cross-encoder/ms-marco-MiniLM-L-6-v2`). Off by default; see the results for why.
+- **Chat interface.** Chats on the left (kept in your browser), your documents with checkboxes on
+  the right so you choose which ones are searched, and the passages behind each answer.
+- **Idempotent ingestion.** `.txt`, `.md`, `.pdf` and `.docx`, hashed by content, so uploading the
+  same file twice does nothing. Chunking is recursive (paragraph, then sentence) or fixed-window.
+- **Per-request tracing.** Each response carries stage timings and counters (LLM calls, cache hits,
+  reranker pairs).
+- **Evaluation tooling.** A BEIR runner, ranking metrics with bootstrap confidence intervals,
+  validation of the confidence signal, and a harness for your own documents and questions.
 
----
+## Quick start
 
-## Status
+Requires `mise` and `uv` (see `mise.toml`), or Python 3.12 and `uv`.
 
-| Area | State |
+```bash
+mise install
+uv sync --group dev --extra models     # `models` adds sentence-transformers (pulls PyTorch)
+cp .env.example .env                   # add your LLM key; the app works without one (sources only)
+uv run uvicorn backend.main:app --env-file .env
+```
+
+Open <http://localhost:8000>. The first upload downloads the embedding model (about 90 MB) once.
+Use **Add a document**, tick the sources you want, and ask a question. API docs are at `/docs`.
+
+For tests and development without model downloads: `uv sync --group dev` and `EMBEDDER=hash`
+(a deterministic, offline stand-in that is lexical only and must not be used for reported results).
+
+## Configuration
+
+Set in `.env` (see `.env.example`).
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLM_API_KEY` (or `GROQ_API_KEY`) | none | Key for the LLM. Without it the app returns sources only. |
+| `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | Any OpenAI-compatible endpoint. |
+| `LLM_MODEL` | `openai/gpt-oss-20b` | Model name; check what your provider offers. |
+| `LLM_REASONING_EFFORT` | unset | e.g. `low`, passed through for reasoning models. |
+| `DATA_DIR` | `./data` | Chroma index and the LLM answer cache. |
+| `CHUNK_STRATEGY` | `recursive` | `recursive` or `fixed`. `CHUNK_SIZE` 512, `CHUNK_OVERLAP` 64. |
+| `EMBEDDER` / `EMBED_MODEL` | `sentence-transformers` / `all-MiniLM-L6-v2` | `hash` for offline tests. |
+| `CONFIDENCE_METRIC` / `CONFIDENCE_K` | `rbo` / `10` | `overlap`, `rbo` or `tau`; list depth compared. |
+| `CANDIDATE_POOL` / `RRF_K` | `50` / `60` | Candidates per retriever; RRF constant. |
+| `RERANK_MODEL` / `RERANK_POOL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | Reranker and how many candidates it re-scores. |
+
+Answer text and passages are sent to the configured LLM provider when an answer is written.
+
+## API
+
+| Endpoint | Purpose |
 |---|---|
-| Ingestion (content-hashed, idempotent), chunking (fixed, recursive), dense (Chroma) + BM25 + RRF, tracing, upload/search API, CI | built, Phase 0 |
-| `confidence.py` (overlap, RBO, tau-on-intersection) wired into retrieval | built (thresholds are placeholders) |
-| Eval harness, BEIR runner, signal validation, signal studies | built, Phase 1 |
-| Search page with sources and confidence verdict | built |
-| Reranking, multi-query, history-aware rewrite, generation | planned, Phase 2 |
-| Verified reformulations, study mode, export | planned, Phase 3 |
-| Confidence-gated routing, Retrieval Inspector, semantic chunking, full ablation | planned, Phase 4 |
+| `GET /` | The chat interface. |
+| `GET /health` | Status and whether an LLM key is configured. |
+| `GET /documents` | Ingested documents with passage counts. |
+| `POST /ingest` | Upload a file (multipart `file`). |
+| `POST /search` | Retrieval only: `query`, `k`, `mode`, `rerank`, `doc_ids`. |
+| `POST /ask` | Retrieval plus a cited answer. Also takes `history`, `expand` (0 to 5 extra queries). |
 
+Responses include `results`, `confidence`, `trace`, and for `/ask` an `answer` (text, cited
+passage numbers, model, whether it was cached, whether the model said the documents don't answer),
+`answer_error`, `rewritten_query`, `expansions`, `notes` and `reranked`. `doc_ids` limits the search
+to the listed documents; an empty list searches nothing.
 
----
+## How the confidence signal works
 
-## Results (v1)
+For each question the app takes the top 10 passages from dense search and the top 10 from BM25,
+before fusion, and measures how much those two ranked lists agree with rank-biased overlap, which
+weights agreement at the top of the lists more. The score is in [0, 1]. The badge cutoffs are
+0.3 and 0.6, which are **provisional**: they were not fit on your documents. With a history, the
+signal is computed on the rewritten standalone question.
+
+The badge says how well the search found passages. It does not say whether the answer is correct.
+
+## Results
 
 All numbers come from `benchmarks/results/` and reproduce with the commands in
-[`benchmarks/results/README.md`](benchmarks/results/README.md). Retrieval and signal numbers
-are deterministic (fixed seeds, cached embeddings); latency varies run to run and is not
-reported yet.
+[`benchmarks/results/README.md`](benchmarks/results/README.md). Retrieval and signal numbers are
+deterministic (fixed seeds, cached embeddings).
 
 **Hybrid retrieval vs the single retrievers**, BEIR test sets, nDCG@10 (95% bootstrap CI):
 
@@ -47,9 +113,8 @@ reported yet.
 | SciFact (300 queries) | 0.645 | 0.652 | 0.682 | +0.037 [+0.009, +0.064] |
 | NFCorpus (323 queries) | 0.317 | 0.306 | 0.342 | +0.025 [+0.010, +0.041] |
 
-**Does the confidence signal predict retrieval success?** The signal is how much the dense and
-BM25 rankings agree (rank-biased overlap of their top 10, computed before fusion). Success means
-a relevant document appears in the top 10. Held-out half, 95% CI:
+**Does the confidence signal predict retrieval success?** Success means a relevant document is in the
+top 10. Held-out half, 95% CI:
 
 | Dataset | AUROC | Success in Low, Medium, High |
 |---|---|---|
@@ -64,308 +129,74 @@ a relevant document appears in the top 10. Held-out half, 95% CI:
 | Top-10 overlap | 0.700 [0.621, 0.777] | 0.740 [0.678, 0.800] | 0.733 [0.684, 0.778] |
 | Tau-based score* | 0.720 [0.651, 0.786] | 0.719 [0.661, 0.776] | 0.726 [0.683, 0.768] |
 
-RBO beats both significantly on SciFact and pooled (paired bootstrap on AUROC differences);
-on NFCorpus the three are statistically indistinguishable. *Our tau score is Kendall's tau on
-the shared items, rescaled to [0, 1] and weighted by the shared fraction (a provisional
-definition).
+RBO beats both significantly on SciFact and pooled (paired bootstrap on AUROC differences); on
+NFCorpus the three are statistically indistinguishable. *The tau score is Kendall's tau on the
+shared items, rescaled to [0, 1] and weighted by the shared fraction.
 
-**Do thresholds transfer between datasets?** The ordering does: under the other dataset's
-cutoffs, success still rises from Low to High (58%, 86%, 92% on NFCorpus using SciFact's
-cutoffs; 48%, 79%, 94% in reverse). Bucket sizes do not: under SciFact's cutoffs 55% of
-NFCorpus queries fall in Low. Calibration error after transfer stayed close to within-dataset
-calibration (ECE 0.068 and 0.042 vs 0.046 and 0.058, within noise at this sample size).
+**Do cutoffs transfer between datasets?** The ordering does: under the other dataset's cutoffs,
+success still rises from Low to High (58%, 86%, 92% on NFCorpus using SciFact's cutoffs; 48%, 79%,
+94% in reverse). Bucket sizes do not: under SciFact's cutoffs 55% of NFCorpus queries fall in Low.
 
-**Caveats.** Success means a relevant document was retrieved, not that an answer was correct.
-Two datasets, both scientific or biomedical text. Cutoffs and calibration must be refit
-on any new corpus.
-
----
-
-## Architecture
-
-Target design. Built so far: ingestion, chunking, hybrid retrieval, the
-confidence signal, tracing and evaluation. The router, reranking, rewriting, generation and
-study mode are planned.
-
-```
-Upload → Ingestion (PDF/DOCX/TXT/MD, content-hashed, idempotent)
-       → Chunking (fixed | recursive | semantic)
-       → Index: Chroma (dense)  +  BM25 (sparse, rebuilt from stored chunks at startup)
-
-Query
-  → History-aware rewrite            (standalone query from prior turns)
-  → First-pass retrieval, in parallel:
-        dense top-N   ─┐
-        BM25  top-N   ─┴→ CONFIDENCE SIGNAL (rank agreement, pre-fusion)
-  → RRF fusion
-  → Router (uses confidence bucket)
-        High    → rerank
-        Medium  → multi-query expansion → RRF merge → rerank
-        Low     → multi-query, wider candidate pool → rerank
-        Floor   → abstain ("not covered by your documents")
-  → Grounded generation + span-level source attribution
-  → Response: answer, citations, confidence badge, verified reformulations
-```
-
-Design rules:
-
-- **The confidence signal is computed once**, on the history-rewritten *original* query,
-  from the raw dense and BM25 ranked lists, before fusion and before any multi-query
-  merging. It measures the question, not the paraphrases.
-- **Every stage is a swappable component** behind a small interface (`Retriever`,
-  `Fuser`, `Reranker`, `Router`). The eval harness sweeps configurations by swapping
-  them, not by editing code.
-- **Every request is traced**: per-stage timings, list contents, and the routing
-  decision are recorded in a structured trace.
-
----
-
-## The confidence signal
-
-`backend/confidence.py` — pure functions, unit-tested, no model needed.
-
-Inputs: two ranked lists of chunk IDs (dense, BM25), top-k each.
-Output: a score in [0, 1] and a bucket.
-
-Metrics implemented (pluggable, and compared against each other in validation):
-
-| Metric | Why |
-|---|---|
-| Top-k overlap (Jaccard / overlap@k) | Simple, interpretable baseline |
-| Rank-Biased Overlap (RBO) | Handles lists with different members; weights top ranks more |
-| Kendall's τ on the intersection | The metric named in the course proposal; ill-defined when lists barely overlap, so it is reported with the intersection size |
-
-Bucketing (Low / Medium / High) uses thresholds fit on a **dev split** of the eval set
-and reported on a **held-out split**. The running pipeline still uses placeholder cutoffs
-until they are fit on the study corpus.
-
-### Validation (before any user study)
-
-`eval/validate_signal.py` answers: *does the badge mean anything?*
-
-- Retrieval success label: gold chunk in the final top-k.
-- Reports success rate per bucket and AUROC of score vs success.
-- Calibration: isotonic regression (cross-validated), reported as ECE and Brier skill.
-- Metric comparison: overlap vs RBO vs τ (`eval/signal_studies.py`).
-- Unanswerable questions: `eval/eval_harness.py` reports their confidence-bucket counts
-  separately.
-
-If the signal does not predict retrieval success, that is a finding, and it changes what
-the user study can claim.
-
----
-
-## Adaptive routing
-
-*Planned, not built yet.*
-
-`backend/router.py` maps confidence bucket to pipeline cost:
-
-- High agreement skips multi-query expansion (saves one LLM round trip).
-- Medium/Low escalate to expansion and a wider candidate pool.
-- Below a floor (and with a weak top reranker score), the system abstains.
-
-Claim to test in the eval: **routing matches the recall of always-full-pipeline at lower
-p50 latency**. The harness reports both, with bootstrap CIs.
-
----
-
-## Verified reformulations
-
-*Planned, not built yet.*
-
-`backend/reformulation.py` — when confidence is Medium/Low, each multi-query paraphrase
-is run through dense + BM25, and its agreement score is computed. Only paraphrases whose
-score beats the original by a margin are surfaced (max 3), each with its own bucket. If
-none qualify, none are shown. This makes the suggestions a measured feature instead of
-raw LLM output.
-
----
-
-## Retrieval Inspector
-
-*Planned, not built yet.*
-
-A developer/demo view (disabled in study mode) showing:
-
-- dense list and BM25 list side by side, with rank movement through RRF and reranking,
-- the confidence score, bucket, and routing decision,
-- per-stage timings from the trace.
-
-Citations in the answer are span-level: clicking one scrolls the document viewer to the
-exact source span and highlights it.
-
----
-
-## Study mode (for the HCI study)
-
-*Planned, not built yet.*
-
-Enabled with `STUDY_MODE=1`. Designed so the survey/analysis team never needs code changes.
-
-- **Participant code + condition assignment.** `/study/start?code=P017` assigns a
-  condition (baseline / badge / badge + reformulations) by balanced random assignment,
-  stored server-side so refreshes cannot change it.
-- **Frozen configuration.** Pipeline config is hashed and logged with every session.
-  Abstention and the Inspector are off in study mode so the badge is the only variable.
-- **Same backend and corpus across conditions.** Only the frontend rendering differs.
-- **Event log (SQLite, append-only).** One row per event:
-
-  | Field | Notes |
-  |---|---|
-  | `participant_code`, `condition`, `session_id`, `config_hash` | identity and design |
-  | `question_id`, `event_type`, `timestamp` | ordering and timing |
-  | `event_type` values | `question_shown`, `answer_shown`, `doc_viewer_opened`, `doc_viewer_closed`, `reformulation_shown`, `reformulation_clicked`, `stated_confidence`, `final_answer_submitted` |
-  | `payload` (JSON) | stated confidence (1–7), duration, clicked text, confidence score and bucket |
-
-- **Export.** `uv run python -m backend.study.export --out data/` writes an anonymized
-  per-participant, per-question CSV (no free-text identifiers). Correctness is joined from
-  the frozen ground-truth question set, not labelled by hand.
-
-Column contract for the export is versioned in `docs/data_contract.md` (planned).
-
----
-
-## Setup
-
-```bash
-mise install                      # pinned Python from mise.toml
-uv sync --group dev --extra models   # runtime + dev deps; `models` adds sentence-transformers
-                                     # (omit it for tests; EMBEDDER=hash runs fully offline)
-
-cp .env.example .env
-# set GROQ_API_KEY (https://console.groq.com)
-
-uv run uvicorn backend.main:app --reload --env-file .env
-```
-
-Open http://localhost:8000/ for the search page, or use the API directly:
-
-```bash
-curl -F file=@notes.md http://localhost:8000/ingest
-curl -X POST localhost:8000/search -H 'content-type: application/json' \
-     -d '{"query": "how does fusion work", "k": 5, "mode": "hybrid"}'
-```
-
-`mode` is `dense`, `bm25` or `hybrid`; hybrid responses include the confidence bucket and
-a per-stage timing trace. API docs are served at `http://localhost:8000/docs`.
-
-Key `.env` settings: `CHUNK_STRATEGY` (fixed | recursive; semantic is planned),
-`CONFIDENCE_METRIC` (overlap | rbo | tau), `CONFIDENCE_K`, `EMBEDDER`. `ROUTING` and
-`STUDY_MODE` are reserved for later phases.
-
-## Verify
-
-```bash
-uv run ruff check .
-uv run ruff format .
-uv run pytest -q
-```
-
-Unit tests cover the pure parts: chunking, BM25 ranking, RRF math, confidence metrics,
-bucketing, evaluation metrics and statistics. Model-backed stages (embedder,
-reranker, LLM calls) are exercised by the eval harness on a real corpus. Pre-commit runs
-the ruff checks; CI (`.github/workflows/ci.yml`) re-runs lint, format check and tests.
-
-## Docker
-
-```bash
-docker build -t ragproject .
-docker run -p 8000:8000 --env-file .env ragproject
-```
-
-Chroma runs embedded (`PersistentClient`), so no compose file is needed. First run
-downloads `all-MiniLM-L6-v2` and `cross-encoder/ms-marco-MiniLM-L-6-v2` from Hugging Face.
-
----
+**Does the cross-encoder help?** On SciFact, reranking the top 50 of the hybrid results gave nDCG@10
+0.695 [0.648, 0.739] against 0.682, a difference of +0.013 [-0.016, +0.043], which is not
+significant. It raised median retrieval time from about 0.1 s to about 2.8 s on a laptop CPU, so it
+is off by default. Reranking was evaluated on SciFact only.
 
 ## Evaluation
 
 ```bash
-# put 3–5 real documents in eval/corpus/
-# write eval/sample_qa.json (schema below)
-
+uv run python -m benchmarks.beir_eval --datasets scifact nfcorpus [--rerank]
+uv run python -m eval.validate_signal --results benchmarks/results/beir.json
+uv run python -m eval.signal_studies --results benchmarks/results/beir.json
 uv run python -m eval.eval_harness --corpus ./eval/corpus --qa ./eval/sample_qa.json
 ```
 
-`eval/sample_qa.json` entry:
+The last command evaluates your own documents. Put them in `eval/corpus/` and write the questions
+yourself:
 
 ```json
-{
-  "id": "q017",
-  "question": "…",
-  "answer": "…",
-  "source_file": "doc2.pdf",
-  "gold_phrase": "a distinctive phrase from the gold chunk",
-  "answerable": true,
-  "coverage": "well-covered | partial | ambiguous | out-of-scope"
-}
+[{"id": "q1", "question": "...", "answer": "...", "source_file": "doc.pdf",
+  "gold_phrase": "a short phrase from the passage that answers it",
+  "answerable": true, "coverage": "well-covered"}]
 ```
 
-Public-benchmark and scale runs live in `benchmarks/`:
+## Development
 
 ```bash
-uv run python -m benchmarks.beir_eval --datasets scifact nfcorpus   # nDCG@10, Recall@100
-uv run python -m eval.validate_signal --results benchmarks/results/beir.json
-uv run python -m eval.signal_studies --results benchmarks/results/beir.json
-# planned: benchmarks.scale (latency vs corpus size), benchmarks.load (QPS, p50/p95)
+uv run ruff check . && uv run ruff format --check . && uv run pytest
 ```
 
-The custom-corpus harness sweeps chunking strategy (fixed, recursive) × retrieval mode
-(dense, BM25, hybrid) and reports hit@5, MRR and latency to `eval_results.json`. Results include bootstrap 95% CIs and paired
-bootstrap comparisons between configurations. Seeds are fixed; runs are reproducible from
-one command.
-
----
-
-## Repository layout
-
-Files for planned phases (router, reformulation, query expansion, history-aware
-rewrite, reranker, generation, study mode, scale and load benchmarks) do not exist yet.
+CI runs the same three commands. The tests cover the pure logic (chunking, BM25, RRF, confidence
+metrics, ranking metrics, statistics), the LLM client against a local stub server, generation,
+the pipeline with a stand-in embedder and real Chroma, and the API. The embedding model, the
+cross-encoder and a live LLM are exercised by the benchmark runs and by hand, not by CI.
 
 ```
-backend/
-  main.py  config.py  pipeline.py  router.py  tracing.py
-  ingestion.py  chunking.py  embedder.py
-  hybrid_retrieval.py     # dense + BM25 + RRF
-  confidence.py           # rank-agreement metrics + bucketing
-  reformulation.py        # verified paraphrase suggestions
-  query_expansion.py  history_aware.py  reranker.py  generation.py
-  study/  assignment.py  logging.py  export.py
-frontend/                 # chat, badge, reformulation chips, doc viewer, inspector
-eval/  corpus/  sample_qa.json  eval_harness.py  validate_signal.py  stats.py
-benchmarks/  beir_eval.py  scale.py  load.py
+backend/       app, pipeline, retrieval, confidence signal, LLM client, generation, reranker
+frontend/      the chat interface (a single HTML file)
+eval/          metrics, bootstrap statistics, calibration, BEIR loader, validation and studies
+benchmarks/    BEIR runner and committed results
 tests/
-docs/  data_contract.md  complexity.md
 ```
 
----
+## Limitations
 
-## Complexity
+- **The badge measures retrieval agreement, not truth.** Both searches can agree on the wrong
+  passage, and the model can misread a right one.
+- **Cutoffs are provisional.** The validation covers two scientific datasets; fit cutoffs on your
+  own documents before relying on the labels.
+- **Citations are written by the model and not verified.** The prompt asks for answers from the
+  passages only, but an answer can include outside knowledge or cite a passage that only loosely
+  supports a sentence. The page flags answers that cite nothing.
+- **Small corpora weaken the signal.** With fewer than 10 passages the top-10 lists cannot fully
+  overlap, and with a single passage BM25 returns nothing.
+- **BM25 is rebuilt on every upload and scores every passage per query** (`rank_bm25`). It is fine
+  for hundreds of documents, not for very large collections.
+- **The cross-encoder did not help on SciFact** and is slow on a CPU.
+- **Single user, no authentication.** Chats live in the browser's local storage. The app is meant
+  to run on your own machine.
+- **Benchmark latency varies between runs** and is not reported as a finding.
 
-Per-stage time and space analysis and the end-to-end query cost model are in
-[`docs/complexity.md`](docs/complexity.md). Predicted, not yet measured: dense retrieval scales sublinearly
-(HNSW), BM25 via `rank_bm25` scales linearly in corpus size, and LLM stages are constant
-in corpus size, which is what the confidence-gated router exploits.
+## License
 
-## Known limitations
-
-- **BM25 rebuilds on every add** (`rank_bm25` has no incremental API). The index is rebuilt
-  from stored chunks at startup, so restarts are safe, but a large, frequently updated
-  corpus would need a real inverted-index store (SQLite FTS5, OpenSearch).
-- **Ingestion is idempotent by content hash**, but there is still no multi-user isolation;
-  this is a single-tenant system.
-- **Tiny corpora degrade the signal.** Found in the Phase 0 smoke test: with a single
-  chunk, `rank_bm25`'s IDF goes non-positive, BM25 returns nothing, and the confidence
-  score is 0 (Low). Overlap is also normalised by k, so a corpus with fewer than k chunks
-  cannot reach High. Irrelevant for the 3-5 document study corpus, but the Phase 1
-  validation must run on corpora with many chunks, and a non-negative IDF variant
-  (Lucene-style) is a candidate fix.
-- **Multi-query and history-aware rewriting each add an LLM round trip.** Routing reduces
-  how often multi-query runs; the latency/recall trade-off is reported, not assumed.
-- **Confidence is a retrieval-agreement signal, not a truth signal.** Both retrievers can
-  agree on the wrong chunk, and the generator can still misread a right one. The badge
-  should be described to users as "how much the search methods agree", not "how likely
-  the answer is correct".
-- **Small study sample.** Results from the user study are exploratory unless the
-  participant count supports more.
+MIT

@@ -8,6 +8,14 @@ import numpy as np
 from .interfaces import Chunk, Hit
 
 
+def _summarise(chunks: list[Chunk]) -> list[dict]:
+    docs: dict[str, dict] = {}
+    for c in chunks:
+        d = docs.setdefault(c.doc_id, {"doc_id": c.doc_id, "source": c.source, "chunks": 0})
+        d["chunks"] += 1
+    return list(docs.values())
+
+
 class InMemoryVectorStore:
     def __init__(self) -> None:
         self._chunks: dict[str, Chunk] = {}
@@ -23,13 +31,20 @@ class InMemoryVectorStore:
             self._chunks[c.id] = c
             self._order.append(c.id)
 
-    def query(self, embedding: list[float], k: int) -> list[Hit]:
+    def query(self, embedding: list[float], k: int, doc_ids=None) -> list[Hit]:
         if not self._order:
             return []
         q = np.asarray(embedding, dtype=np.float32)
         sims = self._vecs @ q / (np.linalg.norm(self._vecs, axis=1) * np.linalg.norm(q) + 1e-12)
+        if doc_ids is not None:  # restrict to the chosen documents
+            allowed = set(doc_ids)
+            keep = np.array([self._chunks[c].doc_id in allowed for c in self._order])
+            sims = np.where(keep, sims, -np.inf)
         idx = np.lexsort((np.arange(len(sims)), -sims))[:k]  # stable tie-break by insert order
-        return [Hit(self._order[i], float(sims[i])) for i in idx]
+        return [Hit(self._order[i], float(sims[i])) for i in idx if np.isfinite(sims[i])]
+
+    def documents(self) -> list[dict]:
+        return _summarise(self.all_chunks())
 
     def has_doc(self, doc_id: str) -> bool:
         return any(c.doc_id == doc_id for c in self._chunks.values())
@@ -87,16 +102,20 @@ class ChromaVectorStore:
             metadatas=[self._meta(c) for c in chunks],
         )
 
-    def query(self, embedding: list[float], k: int) -> list[Hit]:
+    def query(self, embedding: list[float], k: int, doc_ids=None) -> list[Hit]:
         n = self._col.count()
-        if n == 0:
+        if n == 0 or (doc_ids is not None and not list(doc_ids)):
             return []
-        res = self._col.query(query_embeddings=[embedding], n_results=min(k, n))
+        where = None if doc_ids is None else {"doc_id": {"$in": list(doc_ids)}}
+        res = self._col.query(query_embeddings=[embedding], n_results=min(k, n), where=where)
         # Chroma returns cosine *distance*; convert to similarity
         return [Hit(i, 1.0 - d) for i, d in zip(res["ids"][0], res["distances"][0], strict=True)]
 
     def has_doc(self, doc_id: str) -> bool:
         return bool(self._col.get(where={"doc_id": doc_id}, limit=1)["ids"])
+
+    def documents(self) -> list[dict]:
+        return _summarise(self.all_chunks())
 
     def get(self, chunk_ids: list[str]) -> list[Chunk]:
         if not chunk_ids:

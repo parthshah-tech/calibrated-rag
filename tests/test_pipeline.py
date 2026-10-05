@@ -77,3 +77,54 @@ def test_chroma_store_matches_in_memory_and_survives_restart(tmp_path):
     assert again.ingest("a.txt", DOC_A.encode()).skipped
     assert top_source(again.retrieve("XJ-4471", 3, "bm25")) == "b.txt"
     assert chroma.store.count() == again.store.count()
+
+
+def _two_docs(pipe):
+    a = pipe.ingest("a.txt", DOC_A.encode())
+    b = pipe.ingest("b.txt", DOC_B.encode())
+    return a.doc_id, b.doc_id
+
+
+def test_documents_lists_each_source_once_with_chunk_counts(pipeline):
+    a, b = _two_docs(pipeline)
+    docs = {d["doc_id"]: d for d in pipeline.store.documents()}
+    assert set(docs) == {a, b} and docs[a]["source"] == "a.txt" and docs[b]["chunks"] >= 1
+    assert sum(d["chunks"] for d in docs.values()) == pipeline.store.count()
+
+
+def test_doc_filter_restricts_dense_bm25_and_hybrid(pipeline):
+    a, b = _two_docs(pipeline)
+    for mode in ("dense", "bm25", "hybrid"):
+        only_b = pipeline.retrieve("fusion rankings keyword", 5, mode, doc_ids=[b])
+        assert only_b.chunks and {c.source for c in only_b.chunks.values()} == {"b.txt"}
+        none = pipeline.retrieve("fusion rankings keyword", 5, mode, doc_ids=[])
+        assert none.fused == []
+        every = pipeline.retrieve("fusion rankings keyword", 5, mode, doc_ids=None)
+        assert {c.source for c in every.chunks.values()} == {"a.txt", "b.txt"} or mode == "bm25"
+
+
+def test_doc_filter_also_applies_to_expansion_queries(pipeline):
+    from backend.llm import FakeLLM
+
+    a, b = _two_docs(pipeline)
+    pipeline.llm = FakeLLM(["sparse retrieval keyword matches"])
+    res = pipeline.retrieve("fusion", 5, expand=1, doc_ids=[a])
+    assert {c.source for c in res.chunks.values()} == {"a.txt"}
+
+
+def test_chroma_doc_filter_matches_memory(tmp_path):
+    from backend.config import Settings
+    from backend.embedder import HashEmbedder
+    from backend.pipeline import RAGPipeline
+    from backend.vector_store import ChromaVectorStore
+
+    pipe = RAGPipeline(
+        ChromaVectorStore(str(tmp_path / "c")),
+        HashEmbedder(),
+        Settings(chunk_size=120, chunk_overlap=20),
+    )
+    a, b = _two_docs(pipe)
+    res = pipe.retrieve("dense embeddings paraphrase", 5, "dense", doc_ids=[b])
+    assert res.chunks and {c.source for c in res.chunks.values()} == {"b.txt"}
+    assert pipe.retrieve("anything", 5, "dense", doc_ids=[]).fused == []
+    assert {d["source"] for d in pipe.store.documents()} == {"a.txt", "b.txt"}

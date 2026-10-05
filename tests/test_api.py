@@ -105,3 +105,14 @@ def test_search_and_ask_accept_rerank(loaded):
     a = c.post("/ask", json={"query": "XJ-4471 code", "rerank": True}).json()
     assert a["reranked"] is True and a["answer"]["cited"] == [1]
     assert c.post("/search", json={"query": "XJ-4471 code"}).json()["reranked"] is False
+
+
+def test_documents_endpoint_and_source_selection(loaded):
+    c = client(loaded)
+    docs = c.get("/documents").json()
+    assert {d["source"] for d in docs} == {"a.txt", "b.txt", "c.txt"}
+    only = [d["doc_id"] for d in docs if d["source"] == "c.txt"]
+    out = c.post("/ask", json={"query": "flour water", "doc_ids": only}).json()
+    assert out["results"] and {r["source"] for r in out["results"]} == {"c.txt"}
+    none = c.post("/search", json={"query": "flour water", "doc_ids": []}).json()
+    assert none["results"] == []
