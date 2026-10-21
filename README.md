@@ -10,7 +10,9 @@ public benchmarks, and the results are below.
 
 It started as a personal project and became the system behind a group study in a Human-Computer
 Interaction course (BITS F364) on whether such a signal helps people trust answers appropriately.
-This repository contains the system and its evaluation, not the study.
+This repository contains the system, its evaluation, and the software to run the study
+(consent, conditions, saved stimuli, event log, export, grading sheets). It contains no study
+data and no study questions.
 
 ## What it does
 
@@ -35,6 +37,13 @@ This repository contains the system and its evaluation, not the study.
   same file twice does nothing. Chunking is recursive (paragraph, then sentence) or fixed-window.
 - **Per-request tracing.** Each response carries stage timings and counters (LLM calls, cache hits,
   reranker pairs).
+- **Study mode.** A closed experiment flow: consent, instructions, a practice item, questions in
+  a random order per participant, accept-or-override answers with a 1-to-7 confidence rating, a
+  document viewer, a questionnaire and a debrief. Three conditions (no badge, badge, badge plus
+  suggested rewordings) are assigned by the server and enforced in its responses. Answers are
+  saved once and replayed, so the study server needs no models or API key. An append-only log,
+  blind grading sheets and an anonymising export complete it. See [`docs/study.md`](docs/study.md),
+  [`docs/analysis_plan.md`](docs/analysis_plan.md) and [`docs/deploy.md`](docs/deploy.md).
 - **Evaluation tooling.** A BEIR runner, ranking metrics with bootstrap confidence intervals,
   validation of the confidence signal, and a harness for your own documents and questions.
 
@@ -70,6 +79,8 @@ Set in `.env` (see `.env.example`).
 | `EMBEDDER` / `EMBED_MODEL` | `sentence-transformers` / `all-MiniLM-L6-v2` | `hash` for offline tests. |
 | `CONFIDENCE_METRIC` / `CONFIDENCE_K` | `rbo` / `10` | `overlap`, `rbo` or `tau`; list depth compared. |
 | `CANDIDATE_POOL` / `RRF_K` | `50` / `60` | Candidates per retriever; RRF constant. |
+| `CONFIDENCE_LOW` / `CONFIDENCE_HIGH` | `0.3` / `0.6` | Badge cutoffs. Fit them on your own documents (`eval.fit_cutoffs`). |
+| `STUDY_MODE`, `STUDY_QUESTIONS`, `STUDY_FROZEN`, `STUDY_DB`, `STUDY_TIME_BUDGET_MIN`, `STUDY_ADMIN_TOKEN`, `STUDY_SALT` | off, see `docs/study.md` | Study mode. |
 | `RERANK_MODEL` / `RERANK_POOL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | Reranker and how many candidates it re-scores. |
 
 Answer text and passages are sent to the configured LLM provider when an answer is written.
@@ -84,6 +95,7 @@ Answer text and passages are sent to the configured LLM provider when an answer 
 | `POST /ingest` | Upload a file (multipart `file`). |
 | `POST /search` | Retrieval only: `query`, `k`, `mode`, `rerank`, `doc_ids`. |
 | `POST /ask` | Retrieval plus a cited answer. Also takes `history`, `expand` (0 to 5 extra queries). |
+| `/study`, `/study/*` | Study mode only: participant page, session start, ask, events, documents, token-protected data downloads. The endpoints above are closed in study mode. |
 
 Responses include `results`, `confidence`, `trace`, and for `/ask` an `answer` (text, cited
 passage numbers, model, whether it was cached, whether the model said the documents don't answer),
@@ -173,7 +185,10 @@ the pipeline with a stand-in embedder and real Chroma, and the API. The embeddin
 cross-encoder and a live LLM are exercised by the benchmark runs and by hand, not by CI.
 
 ```
-backend/       app, pipeline, retrieval, confidence signal, LLM client, generation, reranker
+backend/       app, pipeline, retrieval, confidence signal, LLM client, generation, reranker,
+               study mode (backend/study/)
+study/         example question file (the real one and the saved stimuli are gitignored)
+docs/          study runbook and data dictionary, analysis plan, hosting guide
 frontend/      the chat interface (a single HTML file)
 eval/          metrics, bootstrap statistics, calibration, BEIR loader, validation and studies
 benchmarks/    BEIR runner and committed results
@@ -196,6 +211,9 @@ tests/
 - **The cross-encoder gave no significant gain** on either dataset and takes about 3 s per query on a CPU.
 - **Single user, no authentication.** Chats live in the browser's local storage. The app is meant
   to run on your own machine.
+- **Study correctness needs real grading.** The export's automatic correctness only checks that
+  the right passage was retrieved and whether the model refused; the grading sheets exist so
+  people grade the answers properly.
 - **Benchmark latency varies between runs** and is not reported as a finding.
 
 ## License

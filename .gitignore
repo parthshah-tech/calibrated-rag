@@ -7,3 +7,10 @@ data/*
 .pytest_cache/
 .ruff_cache/
 eval_results.json
+
+# Private study material: questions hold ground truth and the log holds participant data
+study/questions.json
+data/study_export/
+study/frozen.json
+study/frozen_report.csv
+study/ai_answers_to_grade.csv

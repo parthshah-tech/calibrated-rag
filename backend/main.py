@@ -1,4 +1,4 @@
-"""FastAPI app. Phase 0: upload + hybrid search. Generation, streaming and study mode come later."""
+"""FastAPI app: chat interface, document upload, search, cited answers, and study mode."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings
@@ -47,17 +47,24 @@ def build_pipeline(settings: Settings | None = None) -> RAGPipeline:
     )
 
 
-def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
+def create_app(pipeline: RAGPipeline | None = None, settings: Settings | None = None) -> FastAPI:
+    settings = settings or Settings.from_env()
     app = FastAPI(title="RAG Project")
     holder: dict[str, RAGPipeline | None] = {"p": pipeline}
 
     def get() -> RAGPipeline:
         if holder["p"] is None:  # lazy so importing the app does not load models
-            holder["p"] = build_pipeline()
+            holder["p"] = build_pipeline(settings)
         return holder["p"]
+
+    def not_in_study() -> None:
+        if settings.study_mode:  # participants only use the study endpoints
+            raise HTTPException(403, "disabled in study mode")
 
     @app.get("/", include_in_schema=False)
     def index():
+        if settings.study_mode:
+            return RedirectResponse("/study")
         page = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
         if not page.exists():
             raise HTTPException(404, "frontend/index.html is missing")
@@ -75,6 +82,7 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
 
     @app.post("/ingest")
     async def ingest(file: UploadFile):
+        not_in_study()
         name = file.filename or "upload"
         if "." + name.rsplit(".", 1)[-1].lower() not in SUPPORTED:
             raise HTTPException(415, f"unsupported file type; supported: {sorted(SUPPORTED)}")
@@ -110,12 +118,14 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
 
     @app.post("/search")
     def search(req: SearchRequest):
+        not_in_study()
         check_mode(req)
         r = get().retrieve(req.query, req.k, req.mode, rerank=req.rerank, doc_ids=req.doc_ids)
         return payload(r)
 
     @app.post("/ask")
     def ask(req: SearchRequest):
+        not_in_study()
         check_mode(req)
         history = [t.model_dump() for t in req.history]
         r, ans, err = get().answer(
@@ -123,6 +133,13 @@ def create_app(pipeline: RAGPipeline | None = None) -> FastAPI:
         )
         return {**payload(r), "answer": asdict(ans) if ans else None, "answer_error": err}
 
+    if settings.study_mode:
+        from .study.api import register_study
+        from .study.questions import load_questions
+        from .study.stimuli import build_stimuli
+
+        questions = load_questions(settings.study_questions)
+        register_study(app, settings, build_stimuli(settings, get, questions), questions)
     return app
 
 
