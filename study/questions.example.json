@@ -1,0 +1,43 @@
+[
+  {
+    "id": "p00",
+    "question": "What is BM25?",
+    "answer": "A sparse retrieval function.",
+    "source_file": "example.md",
+    "gold_phrase": "sparse retrieval function",
+    "answerable": true,
+    "coverage": "well-covered",
+    "attention_check": false,
+    "practice": true
+  },
+  {
+    "id": "q01",
+    "question": "What does Reciprocal Rank Fusion combine?",
+    "answer": "Rankings from several retrievers.",
+    "source_file": "example.md",
+    "gold_phrase": "combines rankings from several retrievers",
+    "answerable": true,
+    "coverage": "well-covered",
+    "attention_check": false
+  },
+  {
+    "id": "q02",
+    "question": "Which retrieval function rewards exact keyword matches?",
+    "answer": "BM25.",
+    "source_file": "example.md",
+    "gold_phrase": "rewards exact keyword matches",
+    "answerable": true,
+    "coverage": "partial",
+    "attention_check": true
+  },
+  {
+    "id": "q03",
+    "question": "Who won the football World Cup in 2010?",
+    "answer": "",
+    "source_file": "",
+    "gold_phrase": "",
+    "answerable": false,
+    "coverage": "out-of-scope",
+    "attention_check": false
+  }
+]

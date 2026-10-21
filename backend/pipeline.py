@@ -1,5 +1,5 @@
-"""Phase 0/1 pipeline: ingest, then retrieve with dense / bm25 / hybrid (RRF) and attach the
-pre-fusion confidence signal. Later phases add rewrite, multi-query, rerank, routing."""
+"""The retrieval pipeline: ingest, retrieve (dense, BM25 or hybrid with RRF) with the pre-fusion
+confidence signal, optional rewrite, multi-query expansion and reranking, and cited answers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from .bm25_index import BM25Index
-from .confidence import compute_confidence
+from .confidence import ConfidenceResult, compute_confidence
 from .config import Settings
 from .generation import Answer, generate_answer
 from .history_aware import rewrite_query, trim_history
@@ -137,6 +137,7 @@ class RAGPipeline:
                     [h.chunk_id for h in res.bm25],
                     metric=self.settings.confidence_metric,
                     k=self.settings.confidence_k,
+                    thresholds=(self.settings.confidence_low, self.settings.confidence_high),
                 )
             rankings = [[h.chunk_id for h in res.dense], [h.chunk_id for h in res.bm25]]
             if expand and self.llm is not None:
@@ -189,3 +190,33 @@ class RAGPipeline:
             counters["llm_calls"] = counters.get("llm_calls", 0) + 1
             counters["llm_cache_hits"] = counters.get("llm_cache_hits", 0) + int(ans.cached)
         return res, ans, None
+
+    def suggest_reformulations(
+        self,
+        query: str,
+        base_score: float,
+        n: int = 3,
+        margin: float = 0.05,
+        doc_ids: list[str] | None = None,
+    ) -> list[dict]:
+        """Differently-worded versions of the question that the two retrievers agree on more.
+
+        Each LLM-written paraphrase is run through dense and BM25 and scored with the same
+        confidence signal; only those that beat the original by `margin` are returned, best
+        first, with their own bucket. No LLM or no better paraphrase gives an empty list."""
+        if self.llm is None:
+            return []
+        s, tracer = self.settings, Tracer()
+        out = []
+        for q in expand_query(self.llm, query, n).queries:
+            d, b = self._first_pass(tracer, q, True, True, doc_ids=doc_ids)
+            conf: ConfidenceResult = compute_confidence(
+                [h.chunk_id for h in d],
+                [h.chunk_id for h in b],
+                metric=s.confidence_metric,
+                k=s.confidence_k,
+                thresholds=(s.confidence_low, s.confidence_high),
+            )
+            if conf.score >= base_score + margin:
+                out.append({"text": q, "bucket": conf.bucket, "score": conf.score})
+        return sorted(out, key=lambda r: -r["score"])[:3]

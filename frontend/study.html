@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Document question study</title>
+<style>
+:root{--bg:#f4f6f8;--surf:#fff;--ink:#1c2733;--muted:#5b6876;--line:#d5dbe2;--acc:#5b4bd5;--low:#b4530a;--mid:#2c6a99;--high:#1d7a5a;--serif:"Iowan Old Style","Palatino Linotype",Georgia,serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0d1117;--surf:#141a22;--ink:#e6ebf0;--muted:#97a4b1;--line:#27313c;--acc:#8f82f5;--low:#e08a3c;--mid:#6aa8d6;--high:#4fb88f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:46rem;margin:0 auto;padding:1.5rem 1.25rem 4rem}
+h1{font:600 1.7rem/1.2 var(--serif);margin:.2rem 0 .8rem}
+p{margin:.5rem 0}
+button{font:inherit;color:inherit;border:1px solid var(--line);border-radius:8px;background:var(--surf);padding:.55rem 1rem;cursor:pointer}
+button.go{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+button:disabled{opacity:.45;cursor:default}
+input[type=text],textarea{font:inherit;color:inherit;background:var(--surf);border:1px solid var(--line);border-radius:8px;padding:.6rem .8rem;width:100%}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.bar{display:flex;justify-content:space-between;color:var(--muted);font-size:.9rem;margin-bottom:.8rem}
+#timer.low{color:var(--low);font-weight:700}
+.q{font:600 1.35rem/1.35 var(--serif);margin:.3rem 0 1rem}
+.card{background:var(--surf);border:1px solid var(--line);border-radius:12px;padding:1rem 1.1rem;margin:1rem 0}
+.body{font:1.06rem/1.7 var(--serif);white-space:pre-wrap;overflow-wrap:anywhere}
+.body a{color:inherit;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.muted{color:var(--muted);font-size:.9rem}
+.err{color:var(--low)}
+.verdict{margin:1rem 0;padding-left:.9rem;border-left:4px solid var(--line)}
+.verdict.Low{border-color:var(--low)}.verdict.Medium{border-color:var(--mid)}.verdict.High{border-color:var(--high)}
+.verdict b{font:600 1.1rem var(--serif)}
+.gauge{display:flex;gap:4px;max-width:9rem;margin:.3rem 0}
+.gauge i{flex:1;height:7px;border-radius:2px;background:var(--line)}
+.verdict.Low i:nth-child(1){background:var(--low)}.verdict.Medium i:nth-child(-n+2){background:var(--mid)}.verdict.High i{background:var(--high)}
+.chips{display:flex;flex-wrap:wrap;gap:.5rem;margin:.4rem 0}
+.chips button{border-radius:999px;font-size:.92rem}
+.hit{padding:.6rem 0;border-top:1px solid var(--line)}
+.hit .t{font:.95rem/1.55 var(--serif);white-space:pre-wrap;overflow-wrap:anywhere}
+.opt{display:flex;gap:.5rem;align-items:flex-start;margin:.4rem 0}
+.scale{display:flex;gap:.4rem;flex-wrap:wrap;margin:.5rem 0}
+.scale button{width:2.6rem;height:2.6rem;padding:0}
+.scale button[aria-pressed=true]{background:var(--acc);border-color:var(--acc);color:#fff}
+.ends{display:flex;justify-content:space-between;max-width:20.5rem;color:var(--muted);font-size:.82rem}
+.row{display:flex;gap:.3rem;flex-wrap:wrap;align-items:center;margin:.3rem 0 1rem}
+.row label{border:1px solid var(--line);border-radius:8px;padding:.3rem .65rem;cursor:pointer;background:var(--surf)}
+.vh{position:absolute;opacity:0;width:1px;height:1px}
+.row label:has(input:checked){background:var(--acc);border-color:var(--acc);color:#fff}
+.row label:focus-within{outline:2px solid var(--acc);outline-offset:2px}
+dialog{width:min(52rem,94vw);height:80vh;border:1px solid var(--line);border-radius:12px;background:var(--surf);color:var(--ink);padding:1rem}
+dialog pre{white-space:pre-wrap;overflow-wrap:anywhere;font:.92rem/1.6 ui-monospace,Menlo,Consolas,monospace;height:calc(100% - 4.2rem);overflow:auto;margin:.6rem 0 0}
+dialog select{font:inherit;padding:.3rem}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+  <h1>Document question study</h1>
+
+  <section class="scr" id="s-start">
+    <div class="card"><p id="info">Loading...</p></div>
+    <p>Your participant code: <b id="codeshow"></b></p>
+    <p class="muted" id="codehint">Please write this code down. You will not need to type it again.</p>
+    <p id="codebox" hidden><input id="code" type="text" maxlength="32" aria-label="Participant code" placeholder="Participant code"></p>
+    <label class="opt"><input type="checkbox" id="consent"><span id="consenttext">I have read the information above and agree to take part.</span></label>
+    <p><button class="go" id="start" disabled>Start</button></p>
+    <p class="err" id="e-start" role="alert"></p>
+  </section>
+
+  <section class="scr" id="s-instr" hidden>
+    <div class="card"><p id="instr"></p><p id="note" class="muted"></p></div>
+    <p><button class="go" id="begin">Begin the practice question</button></p>
+  </section>
+
+  <section class="scr" id="s-q" hidden>
+    <div class="bar"><span id="prog"></span><span>Time left: <span id="timer"></span></span></div>
+    <p class="err" id="timeup" hidden>Time is up. Please finish this question or continue to the questionnaire.</p>
+    <div class="q" id="qtext"></div>
+    <p><button class="go" id="ask">Ask the assistant</button> <button id="open">Open the source documents</button></p>
+    <div id="out" aria-live="polite"></div>
+    <div class="card" id="decide" hidden>
+      <b>Your answer</b>
+      <label class="opt"><input type="radio" name="dec" value="accept"><span>I accept the assistant's answer</span></label>
+      <label class="opt"><input type="radio" name="dec" value="other"><span>I would answer differently</span></label>
+      <textarea id="mine" rows="3" maxlength="1000" placeholder="Type your answer" hidden aria-label="Your answer"></textarea>
+      <p style="margin-top:1rem"><b>How confident are you that your final answer is correct?</b></p>
+      <div class="scale" id="scale" role="group" aria-label="Confidence from 1 to 7"></div>
+      <div class="ends"><span>1: not at all</span><span>7: completely</span></div>
+      <p><button class="go" id="next" disabled>Submit and continue</button></p>
+    </div>
+    <p><button id="skip" hidden>Continue to the questionnaire</button></p>
+  </section>
+
+  <section class="scr" id="s-survey" hidden>
+    <h1>A few last questions</h1>
+    <form id="sv"></form>
+    <p><button class="go" id="svsend" disabled>Submit</button></p>
+    <p class="err" id="e-sv" role="alert"></p>
+  </section>
+
+  <section class="scr" id="s-end" hidden>
+    <div class="card"><p id="debrief"></p></div>
+    <p>Your code: <b id="codeend"></b></p>
+  </section>
+</main>
+<dialog id="dlg">
+  <div><select id="docsel" aria-label="Document"></select> <button id="close">Close</button></div>
+  <pre id="doctext" tabindex="0"></pre>
+</dialog>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const inlineMd = h => h.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`\n]+)`/g, "<code>$1</code>");
+const MEANING = {Low: ["Low confidence", "The two search methods disagree about what matches."],
+  Medium: ["Medium confidence", "The search methods partly agree."], High: ["High confidence", "Both search methods agree."]};
+const S = {code: "", qs: [], i: 0, texts: {}, survey: [], budget: 35, phaseAt: null, offset: 0,
+  submitted: new Set(), ans: null, conf: null, reforms: [], expired: false, busy: false, ticking: false};
+const cur = () => S.qs[S.i];
+const now = () => Date.now() / 1000 + S.offset;
+const show = id => { document.querySelectorAll(".scr").forEach(s => s.hidden = s.id !== id); window.scrollTo(0, 0); };
+async function post(path, body) {
+  const r = await fetch(path, {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify(body)});
+  if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail || d; } catch (_) {} throw new Error(d); }
+  return r.json();
+}
+const ev = (type, payload = {}, qid) => post("/study/event", {code: S.code, question_id: qid === undefined ? (cur() || {}).id || null : qid, type, payload});
+const evq = (...a) => ev(...a).catch(() => {});
+
+/* ---- start ---- */
+const param = new URLSearchParams(location.search).get("code");
+const gen = () => "S" + Array.from({length: 6}, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
+const code = (param || "").trim() || gen();
+$("code").value = code; $("codeshow").textContent = code;
+if (!param) { $("codebox").hidden = false; $("codehint").textContent = "Please write this code down. If you were given a code, type it below instead."; }
+const okStart = () => { $("start").disabled = !($("consent").checked && /^[A-Za-z0-9_-]{1,32}$/.test($("code").value.trim())); };
+$("consent").addEventListener("change", okStart);
+$("code").addEventListener("input", () => { $("codeshow").textContent = $("code").value.trim(); okStart(); });
+(async () => { try { const t = await (await fetch("/study/info")).json(); $("info").textContent = t.info; $("consenttext").textContent = t.consent; } catch (_) { $("info").textContent = "Could not load the study information. Please tell the researcher."; } })();
+$("start").addEventListener("click", async () => {
+  $("start").disabled = true; $("e-start").textContent = "";
+  try {
+    S.code = $("code").value.trim();
+    const d = await post("/study/start", {code: S.code});
+    Object.assign(S, {qs: d.questions, texts: d.texts, survey: d.survey, budget: d.time_budget_min,
+      phaseAt: d.phase_started_at, offset: d.server_time - Date.now() / 1000, submitted: new Set(d.submitted)});
+    if (!d.resumed) await evq("consent_given", {}, null);
+    $("instr").textContent = d.texts.instructions; $("note").textContent = d.texts.badge_note;
+    if (d.survey_done) return finish();
+    if (S.phaseAt) return nextItem(); else show("s-instr");
+  } catch (e) { $("e-start").textContent = e.message; $("start").disabled = false; }
+});
+$("begin").addEventListener("click", async () => {
+  $("begin").disabled = true;
+  try { const r = await ev("phase_started", {}, null); S.phaseAt = r.ts; nextItem(); } catch (e) { $("begin").disabled = false; }
+});
+
+/* ---- items ---- */
+function nextItem() {
+  const i = S.qs.findIndex(q => !S.submitted.has(q.id));
+  if (i < 0 || S.expired) return toSurvey();
+  S.i = i; S.ans = null; S.conf = null; S.reforms = [];
+  const scored = S.qs.filter(q => !q.practice), q = cur();
+  $("prog").textContent = q.practice ? "Practice question (not scored)" : `Question ${scored.indexOf(q) + 1} of ${scored.length}`;
+  $("qtext").textContent = q.question; $("out").innerHTML = ""; $("decide").hidden = true; $("mine").hidden = true; $("mine").value = "";
+  document.querySelectorAll("input[name=dec]").forEach(r => r.checked = false);
+  [...$("scale").children].forEach(b => b.setAttribute("aria-pressed", "false"));
+  $("ask").disabled = S.expired; $("open").disabled = false; $("skip").hidden = true;
+  show("s-q"); evq("question_shown");
+  if (!S.ticking) { S.ticking = true; tick(); setInterval(tick, 1000); }
+}
+function tick() {
+  const left = S.phaseAt + S.budget * 60 - now();
+  if (left <= 0 && !S.expired) {
+    S.expired = true; $("timeup").hidden = false; $("ask").disabled = true; evq("time_expired", {}, null);
+    if (!S.ans) $("skip").hidden = false;
+  }
+  const m = Math.max(0, Math.floor(left / 60)), s = Math.max(0, Math.floor(left % 60));
+  $("timer").textContent = `${m}:${String(s).padStart(2, "0")}`; $("timer").className = left < 120 ? "low" : "";
+}
+function render(d) {
+  S.ans = d; S.reforms = d.reformulations || [];
+  let h = d.answer
+    ? `<div class="card"><div class="body">${inlineMd(esc(d.answer.text)).replace(/\[(\d+)\]/g, (m, n) => +n >= 1 && +n <= d.passages.length ? `<a href="#p${n}">[${n}]</a>` : m)}</div></div>`
+    : `<div class="card err">No answer could be written${d.answer_error ? ": " + esc(d.answer_error) : ""}.</div>`;
+  if (d.confidence) { const [t, x] = MEANING[d.confidence.bucket];
+    h += `<div class="verdict ${d.confidence.bucket}"><b>${t}</b><div class="gauge" aria-hidden="true"><i></i><i></i><i></i></div><div class="muted">${x} This describes the search, not whether the answer is correct.</div></div>`; }
+  if (S.reforms.length) h += `<p class="muted">Other ways to ask this, where the search methods agree more:</p><div class="chips">` + S.reforms.map((r, k) => `<button data-k="${k}">${esc(r.text)}</button>`).join("") + `</div>`;
+  h += `<div class="card"><b>Passages the answer used</b>` + d.passages.map((p, k) => `<div class="hit" id="p${k + 1}"><div class="muted">${k + 1}. ${esc(p.source)}</div><div class="t">${esc(p.text)}</div></div>`).join("") + `</div>`;
+  $("out").innerHTML = h; $("decide").hidden = false; check();
+}
+async function ask(text) {
+  if (S.busy) return; S.busy = true; $("ask").disabled = true; $("out").innerHTML = '<p class="muted">Asking the assistant...</p>';
+  try { render(await post("/study/ask", {code: S.code, question_id: cur().id, text: text || null})); }
+  catch (e) { $("out").innerHTML = `<p class="err">${esc(e.message)}</p>`; $("ask").disabled = S.expired; }
+  S.busy = false; check();
+}
+const check = () => {
+  const dec = (document.querySelector("input[name=dec]:checked") || {}).value;
+  $("mine").hidden = dec !== "other";
+  $("next").disabled = !(S.ans && dec && S.conf && (dec === "accept" || $("mine").value.trim()) && !S.busy);
+};
+$("ask").addEventListener("click", () => ask(null));
+$("out").addEventListener("click", async e => {
+  const k = e.target.dataset.k; if (k === undefined || S.busy) return;
+  const r = S.reforms[+k]; await evq("reformulation_clicked", {text: r.text}); ask(r.text);
+});
+document.querySelectorAll("input[name=dec]").forEach(r => r.addEventListener("change", check));
+$("mine").addEventListener("input", check);
+for (let n = 1; n <= 7; n++) { // built once, here, never again
+  const b = document.createElement("button"); b.type = "button"; b.textContent = n; b.setAttribute("aria-pressed", "false");
+  b.onclick = () => { S.conf = n; [...$("scale").children].forEach(x => x.setAttribute("aria-pressed", String(x === b))); check(); };
+  $("scale").appendChild(b);
+}
+$("next").addEventListener("click", async () => {
+  if (S.busy) return; S.busy = true; $("next").disabled = true;
+  const accepted = document.querySelector("input[name=dec]:checked").value === "accept";
+  try {
+    await ev("final_answer", {accepted, text: accepted ? "" : $("mine").value.trim()});
+    await ev("stated_confidence", {value: S.conf}); await ev("final_answer_submitted");
+    S.submitted.add(cur().id); S.busy = false; nextItem();
+  } catch (e) { S.busy = false; $("next").disabled = false; $("out").insertAdjacentHTML("beforeend", `<p class="err">${esc(e.message)}. Please try again.</p>`); }
+});
+$("skip").addEventListener("click", toSurvey);
+
+/* ---- documents ---- */
+async function showDoc() { const d = await (await fetch("/study/documents/" + $("docsel").value)).json(); $("doctext").textContent = d.text; $("doctext").scrollTop = 0; }
+$("open").addEventListener("click", async () => {
+  const docs = await (await fetch("/study/documents")).json();
+  $("docsel").innerHTML = docs.map(d => `<option value="${esc(d.doc_id)}">${esc(d.source)}</option>`).join("");
+  await showDoc(); $("dlg").showModal(); evq("doc_viewer_opened", {doc_id: $("docsel").value});
+});
+$("docsel").addEventListener("change", () => { showDoc(); evq("doc_viewer_opened", {doc_id: $("docsel").value}); });
+$("close").addEventListener("click", () => $("dlg").close());
+$("dlg").addEventListener("close", () => evq("doc_viewer_closed", {doc_id: $("docsel").value}));
+
+/* ---- questionnaire and end ---- */
+function toSurvey() {
+  const f = $("sv"); f.innerHTML = "";
+  S.survey.forEach(it => {
+    const d = document.createElement("div");
+    const opts = it.type === "scale" ? [1, 2, 3, 4, 5, 6, 7] : it.options;
+    d.innerHTML = `<p><b>${esc(it.text)}</b></p>` + (it.type === "scale" ? '<div class="ends"><span>1: strongly disagree</span><span>7: strongly agree</span></div>' : "") +
+      `<div class="row">` + opts.map(o => `<label><input class="vh" type="radio" name="${esc(it.id)}" value="${esc(o)}"><span>${esc(o)}</span></label>`).join("") + `</div>`;
+    f.appendChild(d);
+  });
+  show("s-survey"); svCheck();
+}
+const svCheck = () => { $("svsend").disabled = !S.survey.every(it => document.querySelector(`input[name="${it.id}"]:checked`)); };
+$("sv").addEventListener("change", svCheck);
+$("svsend").addEventListener("click", async () => {
+  $("svsend").disabled = true; $("e-sv").textContent = "";
+  const values = {};
+  S.survey.forEach(it => { const v = document.querySelector(`input[name="${it.id}"]:checked`).value; values[it.id] = it.type === "scale" ? +v : v; });
+  try { await ev("survey", {values}, null); finish(); } catch (e) { $("e-sv").textContent = e.message; $("svsend").disabled = false; }
+});
+function finish() { $("debrief").textContent = S.texts.debrief; $("codeend").textContent = S.code; show("s-end"); }
+</script>
+</body>
+</html>
