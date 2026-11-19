@@ -14,3 +14,5 @@ data/study_export/
 study/frozen.json
 study/frozen_report.csv
 study/ai_answers_to_grade.csv
+study/live.json
+study/live-prepared.json

@@ -93,6 +93,10 @@ class StudyStore:
         with self._lock:
             return self._db.serialize()
 
+    def close(self) -> None:
+        with self._lock:
+            self._db.close()
+
     def events(self, code: str | None = None, question_id: str | None = None) -> list[dict]:
         sql, args = "SELECT id, code, question_id, type, ts, payload FROM events", []
         clauses = []

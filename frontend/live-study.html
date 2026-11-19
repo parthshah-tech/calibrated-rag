@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Document assistant study</title>
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    .preview { background: #fff5dd; color: #795718; text-align: center; font-size: 12px; padding: 5px 12px; }
+    .study-page { height: 100dvh; display: flex; flex-direction: column; }
+    #screen { flex: 1; min-height: 0; overflow-y: auto; }
+    .stage { max-width: 760px; margin: 36px auto; padding: 0 24px 40px; }
+    .stage h1 { font-size: 30px; line-height: 1.25; letter-spacing: -.7px; font-weight: 550; }
+    .stage p { color: var(--muted); }
+    .stage .button { margin-top: 20px; }
+    .stage-label, #session-code, #timer { font-size: 12px; color: var(--muted); }
+    .study-workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); height: 100%; }
+    .task-panel { min-height: 0; overflow-y: auto; padding: 26px clamp(24px, 4vw, 60px) 36px; background: var(--surf); }
+    .task-panel h1 { font-size: 26px; line-height: 1.25; letter-spacing: -.5px; margin: 0; }
+    .task-brief { color: var(--muted); margin: 10px 0 0; white-space: pre-line; overflow-wrap: anywhere; }
+    .assistant-panel { min-height: 0; display: flex; flex-direction: column; border-left: 1px solid var(--line); }
+    .assistant-intro { padding: 26px 26px 0; }
+    .assistant-intro h2 { font-size: 19px; margin: 0; }
+    .assistant-intro p { color: var(--muted); font-size: 14px; margin: 4px 0 0; }
+    .assistant-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 26px; }
+    .assistant-scroll .q { font-size: 18px; margin: 24px 0 12px; }
+    .assistant-scroll .a { margin-bottom: 24px; }
+    #ask-form .composer-actions { justify-content: flex-end; }
+    #ask-status { flex: 1; }
+    .panel-jump { display: none; }
+    #notice { font-size: 13px; color: #9a3838; padding: 0 24px; max-width: 808px; width: 100%; margin: 8px auto; }
+    #notice:empty { display: none; }
+    fieldset { padding: 0; border: 0; margin: 24px 0; }
+    legend, .response-label { display: block; font-size: 14px; font-weight: 550; margin-bottom: 8px; }
+    .response-text { border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-height: 68px; max-height: none; resize: vertical; background: white; }
+    .response-text:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+    #response-fields fieldset { min-inline-size: 0; padding-top: 19px; border-top: 1px solid var(--line); }
+    #response-fields p.rating-caption { margin: 6px 0 0; }
+    .response-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .rating { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .rating label { display: inline-flex; gap: 5px; align-items: center; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+    .rating input { margin: 0; accent-color: var(--acc); }
+    .rating-caption { font-size: 12px; color: var(--muted); }
+    .document-row { display: block; width: 100%; text-align: left; padding: 15px 0; border: 0; border-top: 1px solid var(--line); background: white; }
+    .evaluation-answer { padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: white; margin: 24px 0; }
+    #draft-status { min-height: 20px; font-size: 12px; color: var(--muted); }
+    .header { padding: 0 24px; }
+    .study-nav { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .check-consent { display: flex; gap: 12px; align-items: flex-start; }
+    @media (max-width: 840px) {
+      .study-workspace { display: block; height: auto; }
+      .task-panel { overflow: visible; }
+      .assistant-panel { border-left: 0; border-top: 1px solid var(--line); }
+      .assistant-scroll { flex: none; max-height: 52dvh; }
+      .panel-jump { display: inline-block; margin-top: 10px; }
+    }
+    @media (max-width: 600px) {
+      .header { height: auto; min-height: 72px; padding: 12px 16px; align-items: flex-start; }
+      .study-nav { justify-content: flex-end; gap: 4px; }
+      .study-nav .button { padding: 6px 9px; }
+      #session-code { display: none; }
+      .brand { margin-top: 6px; }
+      .stage { margin-top: 24px; }
+    }
+  </style>
+</head>
+<body>
+<div class="study-page">
+  <div id="preview" class="preview" hidden>Study preview</div>
+  <header class="header">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>calibrated</div>
+    <nav class="study-nav" aria-label="Study tools">
+      <span id="session-code"></span><span id="timer"></span>
+      <button class="button" id="documents" hidden>Documents</button>
+      <button class="button quiet" id="withdraw" hidden>Stop study</button>
+    </nav>
+  </header>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <main id="screen"><section class="stage"><p>Loading the study…</p></section></main>
+</div>
+<dialog id="documents-dialog" aria-labelledby="documents-title">
+  <div class="dialog-head"><h2 id="documents-title">Study documents</h2><button class="close" data-close aria-label="Close documents">×</button></div>
+  <div id="document-list"></div>
+</dialog>
+<dialog id="reader" aria-labelledby="reader-title">
+  <div class="dialog-head"><h2 id="reader-title">Sources</h2><button class="close" data-close aria-label="Close source viewer">×</button></div>
+  <div id="reader-content"></div>
+</dialog>
+<script src="/study/app.js" defer></script>
+</body>
+</html>

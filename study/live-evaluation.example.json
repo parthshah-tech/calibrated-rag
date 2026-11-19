@@ -1,0 +1,22 @@
+[
+  {
+    "id": "e1",
+    "query": "Can Alex apply to Programme Cedar with a CGPA of 7.2?",
+    "answer_key": "Yes, with a written department recommendation submitted by 30 April."
+  },
+  {
+    "id": "e2",
+    "query": "Is Programme Maple an option for Alex?",
+    "answer_key": "No. Maple requires 8.0 and has no exceptions."
+  },
+  {
+    "id": "e3",
+    "query": "Is INR 70,000 enough for the whole exchange semester?",
+    "answer_key": "Insufficient information. Accommodation is 60000, but other costs are unknown."
+  },
+  {
+    "id": "e4",
+    "query": "Will the overseas Operating Systems course count toward Alex’s degree?",
+    "answer_key": "Not established. Needs syllabus comparison and written department approval."
+  }
+]diff --git a/study/live.example.json b/study/live.example.json

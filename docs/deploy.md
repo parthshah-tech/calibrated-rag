@@ -1,4 +1,35 @@
-# Hosting the study
+# Hosting the app and study
+
+## General app with separate visitor documents
+
+For the upload-and-chat app, use a dedicated data directory and enable visitor isolation:
+
+```bash
+DATA_DIR=./data/visitor-app ISOLATE_VISITORS=1 STUDY_MODE=0 \
+  uv run uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1
+```
+
+Open `http://localhost:8000` to review locally. Load your LLM settings from `.env` and install
+the model dependencies with `uv sync --extra models --group dev`. Public access requires a
+separately configured HTTPS host or tunnel after local review.
+
+Each browser receives an HttpOnly cookie identifying a separate persistent document collection.
+Uploads, document reads, removals, and retrieval are scoped to that collection. The cookie
+expires after 30 days. Clearing it or using another browser starts a new collection. There is
+currently no account-based recovery. Keep the data directory on persistent storage.
+
+`MAX_UPLOAD_BYTES` defaults to 10 MiB per file and `MAX_DOCUMENTS` to 50 per collection.
+Text PDFs, DOCX, TXT and Markdown are supported. Scanned PDFs need OCR before upload. The Read
+action shows extracted text. Removing a document removes it from retrieval; saved browser chats
+and generated-answer caches retain earlier text. When generation is enabled, retrieved passages
+are sent to the configured LLM provider.
+
+Run one worker: the app serializes pipeline operations to keep the embedding cache, sparse index
+and document changes consistent. Concurrent requests queue. Measure the expected session load
+before opening this setup to a larger audience. Visitor isolation is off by default for existing
+single-user configurations; explicitly enable it for the public upload app.
+
+## Replayed study
 
 In replay mode the study server needs only a small set of packages (`requirements-study.txt`): no
 models, no index, no API key. It reads `study/frozen.json`, writes a SQLite log, and serves one
