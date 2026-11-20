@@ -450,6 +450,8 @@ def register_live_study(app, settings, get_pipeline, lock):
                 store.log(p["code"], None, "live_phase", {"phase": "withdrawn"})
             return snapshot(p)
 
+    from .live_admin import register_admin
     from .live_export import register_export
 
     register_export(app, settings, store, materials, fingerprint, lock)
+    register_admin(app, settings, materials, frontend)

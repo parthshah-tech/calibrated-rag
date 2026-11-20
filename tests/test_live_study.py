@@ -203,3 +203,56 @@ def test_document_view_events_and_config_change(live, monkeypatch):
     assert sum(e["type"] == "live_view_closed" for e in events) == 1
     with pytest.raises(ValueError, match="configuration changed"):
         create_app(pipeline, replace(settings, confidence_metric="overlap"))
+
+
+def test_admin_can_prepare_new_materials_without_changing_active_study(live):
+    _, settings, pipeline = live
+    # A small per-file limit must not cap the total size of the study collection.
+    settings = replace(settings, max_upload_bytes=64)
+    client = TestClient(create_app(pipeline, settings))
+    admin = {"X-Admin-Token": "test-admin"}
+    route = "/study/admin/materials"
+    assert client.get(route).status_code == 403
+    assert (
+        client.post("/study/admin/extract", files={"file": ("guide.txt", b"Text")}).status_code
+        == 403
+    )
+    extracted = client.post(
+        "/study/admin/extract",
+        headers=admin,
+        files={"file": ("hours.txt", b"The venue closes at 17:00.")},
+    )
+    assert extracted.status_code == 200
+    assert (
+        client.post(
+            "/study/admin/extract", headers=admin, files={"file": ("empty.txt", b" ")}
+        ).status_code
+        == 422
+    )
+    draft = client.get(route, headers=admin).json()
+    material = draft["materials"]
+    payload = {
+        field: material[field] for field in ("info", "instructions", "task", "practice", "debrief")
+    }
+    payload.update(
+        revision=draft["revision"],
+        title="Plan a club event",
+        documents=[extracted.json()]
+        + [{"name": f"venue-{i}.txt", "text": f"Venue {i} has a projector."} for i in range(50)],
+        items=[
+            {"id": f"venue-{i}", "prompt": f"Does venue {i} have a projector?"} for i in range(12)
+        ],
+    )
+    saved = client.post(route, headers=admin, json=payload)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["materials"]["evaluations"] == []
+    assert client.post(route, headers=admin, json=payload).status_code == 409
+    assert client.get("/study/info").json()["title"] == material["title"]
+    draft_path = settings.study_db + ".draft.json"
+    pilot = replace(settings, study_task=draft_path, study_db=settings.study_db + ".pilot")
+    with TestClient(create_app(pipeline, pilot)) as next_study:
+        assert next_study.get("/study/info").json()["title"] == "Plan a club event"
+        assert len(enter_task(next_study)["items"]) == 12
+        documents = next_study.get("/study/documents").json()
+        assert len(documents) == 51
+        assert documents[0]["source"] == "hours.txt"

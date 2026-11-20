@@ -23,12 +23,31 @@ team can exclude the session and handle any requested deletion.
 
 ## Prepare the materials
 
+### Edit in the browser
+
+Open `/study/admin` on the live study server and enter its `STUDY_ADMIN_TOKEN`.
+Edit the title, task brief, practice and task questions, grading notes and participant
+information. Select one or more TXT, Markdown, text PDFs or DOCX files with **Add documents**,
+check the extracted text, and remove any previous documents you are replacing. Add or remove
+task questions in the same editor. The study draft has no fixed count for documents or questions.
+The individual file size limit still applies. The saved draft stays beside the
+configured study database, and the editor can download it as `study-draft.json`.
+
+Saving a draft leaves the current study running with its existing materials. To run
+the new draft, use its downloaded file as `STUDY_TASK` on a separate pilot instance.
+Use a new `STUDY_DB` and `DATA_DIR`, and an unused local port for the pilot. A change
+to the task, questions or documents clears the previous shared answers. The team can
+prepare and grade new ones before enabling that stage. Questionnaire items can still
+be edited in the downloaded file.
+
+### Prepare a pilot or final run
+
 `study/live.example.json` contains fictional review material, a task with six decisions, a
 practice item, rubrics, consent text and a provisional project-specific questionnaire. The
 questionnaire requires the qualitative lead's review. It is not a validated SUS scale.
 
-Copy it to the gitignored `study/live.json` and replace the materials with the team's approved
-content. `title` and `task` control the main brief, `practice` defines the practice question, and
+Copy your downloaded draft or the example to the gitignored `study/live.json` and review
+it with the team. `title` and `task` control the main brief, `practice` defines the practice question, and
 `items` defines the main questions in display order. The page adapts to the number of questions.
 `documents` sets the collection shared by both conditions. Give each entry a unique `.txt` or
 `.md` name and the full text. Extract and check the text of PDFs or DOCX files before inclusion.
@@ -85,7 +104,9 @@ Run one worker because pipeline operations and phase transitions use a process-l
 
 ## Export
 
-The export requires the administrator token in a header. Keep it out of participant links.
+Open `/study/admin`, enter the administrator token, and select **Download participant data**.
+The ZIP includes the current run's stored responses. The API also accepts the administrator
+token in a header for scripted downloads. Keep that token out of participant links.
 
 ```bash
 curl -H "X-Admin-Token: $STUDY_ADMIN_TOKEN" \

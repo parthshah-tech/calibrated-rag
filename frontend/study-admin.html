@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Study setup</title>
+  <link rel="stylesheet" href="/app.css">
+  <style>
+    .setup { max-width: 880px; margin: 36px auto; padding: 0 20px 24px; }
+    .setup h1 { font-size: 32px; line-height: 1.25; letter-spacing: -.8px; margin: 0; }
+    .setup h2 { font-size: 19px; margin: 0 0 12px; }
+    .setup p { color: var(--muted); margin: 8px 0 16px; }
+    .setup label { display: block; font-weight: 550; font-size: 14px; margin: 12px 0; }
+    .setup input:not([type=file]), .setup textarea { display: block; width: 100%; height: auto; max-height: none; margin-top: 5px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 7px; background: white; }
+    .setup textarea { resize: vertical; }
+    .setup input:focus-visible, .setup textarea:focus-visible { outline: 2px solid var(--acc); outline-offset: 1px; }
+    .setup-panel { margin: 16px 0; padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: var(--surf); }
+    .setup-panel summary { cursor: pointer; font-weight: 550; }
+    .setup-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+    .setup-row h2 { margin: 0; }
+    .material-list { margin-top: 12px; }
+    .material-entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 10px 0; border-top: 1px solid var(--line); }
+    .material-entry summary { padding: 5px 2px; overflow-wrap: anywhere; }
+    .material-entry .button { padding: 5px 10px; }
+    .setup .material-count { margin: 2px 0 0; font-size: 13px; }
+    #unlock { max-width: 420px; }
+    #setup-status { font-size: 14px; color: var(--muted); }
+    #setup-status.error { color: #a23232; }
+    .setup-footer { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: 12px 0; z-index: 1; }
+    .setup-footer .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <header class="header"><div class="brand"><span class="brand-mark" aria-hidden="true"></span>calibrated</div></header>
+  <main class="setup">
+    <h1>Study setup</h1>
+    <p>Prepare the scenario, questions and shared documents for your next study run.</p>
+    <form id="unlock" class="setup-panel">
+      <label>Administrator token<input id="token" type="password" autocomplete="off" required></label>
+      <button class="button primary">Open editor</button>
+      <p id="unlock-status" role="status"></p>
+    </form>
+    <form id="editor" hidden>
+      <section class="setup-panel" aria-labelledby="data-title">
+        <div class="setup-row"><h2 id="data-title">Study data</h2><button class="button" id="export" type="button">Download participant data</button></div>
+        <p>Download a ZIP with responses, confidence ratings, questionnaire results and activity logs for the current run.</p>
+        <div id="export-status" role="status"></div>
+      </section>
+      <section class="setup-panel">
+        <h2>Scenario</h2>
+        <label>Study title<input id="title" required></label>
+        <label>Task brief<textarea id="task" rows="4" required></textarea></label>
+      </section>
+      <section class="setup-panel">
+        <div class="setup-row">
+          <div><h2>Shared documents</h2><p id="document-count" class="material-count" role="status"></p></div>
+          <button class="button" id="add-documents" type="button">Add documents</button>
+        </div>
+        <p>Select one or more TXT, Markdown, PDF, or DOCX files. Open a document to check or edit its text.</p>
+        <input id="files" type="file" accept=".txt,.md,.pdf,.docx" multiple hidden aria-label="Add documents">
+        <div id="documents" class="material-list"></div>
+      </section>
+      <section class="setup-panel">
+        <div class="setup-row">
+          <div><h2>Task questions</h2><p id="question-count" class="material-count" role="status"></p></div>
+          <button class="button" id="add-question" type="button">Add question</button>
+        </div>
+        <div id="questions" class="material-list"></div>
+      </section>
+      <section class="setup-panel">
+        <h2>Practice question</h2>
+        <label>Question<textarea id="practice-prompt" rows="2" required></textarea></label>
+        <label>Grading notes<textarea id="practice-key" rows="2"></textarea></label>
+      </section>
+      <details class="setup-panel">
+        <summary>Participant information</summary>
+        <label>Consent information<textarea id="info" rows="5" required></textarea></label>
+        <label>Instructions<textarea id="instructions" rows="5" required></textarea></label>
+        <label>Debrief<textarea id="debrief" rows="5" required></textarea></label>
+      </details>
+      <div class="setup-footer setup-row">
+        <div class="buttons"><button class="button primary" type="submit">Save draft</button><button class="button" id="download" type="button" disabled>Download saved draft</button></div>
+        <span id="setup-status" role="status"></span>
+      </div>
+    </form>
+  </main>
+  <script src="/study/admin/setup.js" defer></script>
+</body>
+</html>

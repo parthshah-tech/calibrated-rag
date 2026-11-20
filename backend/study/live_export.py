@@ -268,16 +268,17 @@ def build_archive(store, materials, salt, fingerprint):
     return output.getvalue()
 
 
-def register_export(app, settings, store, materials, fingerprint, lock):
-    def check(token):
-        if not settings.study_admin_token:
-            raise HTTPException(404, "Not found.")
-        if not hmac.compare_digest((token or "").encode(), settings.study_admin_token.encode()):
-            raise HTTPException(403, "Invalid administrator token.")
+def require_admin(settings, token):
+    if not settings.study_admin_token:
+        raise HTTPException(404, "Not found.")
+    if not hmac.compare_digest((token or "").encode(), settings.study_admin_token.encode()):
+        raise HTTPException(403, "Invalid administrator token.")
 
+
+def register_export(app, settings, store, materials, fingerprint, lock):
     @app.get("/study/admin/export.zip", include_in_schema=False)
     def download(x_admin_token: Annotated[str | None, Header()] = None):
-        check(x_admin_token)
+        require_admin(settings, x_admin_token)
         with lock:
             data = build_archive(store, materials, settings.study_salt, fingerprint)
         return Response(
@@ -290,7 +291,7 @@ def register_export(app, settings, store, materials, fingerprint, lock):
 
     @app.get("/study/admin/db", include_in_schema=False)
     def database(x_admin_token: Annotated[str | None, Header()] = None):
-        check(x_admin_token)
+        require_admin(settings, x_admin_token)
         return Response(
             store.serialize(),
             media_type="application/octet-stream",

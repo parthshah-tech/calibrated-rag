@@ -1,5 +1,9 @@
 # Hosting the app and study
 
+The general upload app and live HCI study use the same RAG code and run as separate services.
+Give each its own URL and persistent data directory. Share `/` for the general app and `/study`
+with study participants. Keep `/study/admin` and its token with the research team.
+
 ## General app with separate visitor documents
 
 For the upload-and-chat app, use a dedicated data directory and enable visitor isolation:
@@ -28,6 +32,19 @@ Run one worker: the app serializes pipeline operations to keep the embedding cac
 and document changes consistent. Concurrent requests queue. Measure the expected session load
 before opening this setup to a larger audience. Visitor isolation is off by default for existing
 single-user configurations; explicitly enable it for the public upload app.
+
+## Live HCI study
+
+Use `STUDY_MODE=1` and `STUDY_FLOW=live`. Provide the model credentials and the final
+materials at `STUDY_TASK`, a dedicated corpus at `DATA_DIR`, and a persistent SQLite path
+at `STUDY_DB`. Set separate stable `STUDY_SALT` and `STUDY_ADMIN_TOKEN` secrets on the host.
+The participant page serves the consent, instructions, questions, optional assistant and
+post-task activities. Both conditions use the same corpus. Only one receives the confidence bar.
+
+Use HTTPS and one server worker. Test the deployed links with separate browsers, then back up
+the SQLite database and confirm it persists across restarts. Verify the administrator export
+before collecting data. See [the live study runbook](live-study.md) for the draft editor, materials,
+model setup and analysis exports. The instructions below apply to the older replay mode.
 
 ## Replayed study
 
