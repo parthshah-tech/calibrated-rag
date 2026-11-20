@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import threading
+from zipfile import BadZipFile
 
 from .chunking import chunk_text
 from .interfaces import Chunk, Embedder, IngestResult, VectorStore
@@ -56,7 +57,12 @@ class Ingestor:
         with self._lock:
             if self.store.has_doc(doc_id):
                 return IngestResult(doc_id, filename, 0, skipped=True)
-            text = extract_text(filename, data)
+            from pypdf.errors import PyPdfError
+
+            try:
+                text = extract_text(filename, data)
+            except (PyPdfError, BadZipFile, KeyError) as exc:
+                raise ValueError("Unreadable document") from exc
             spans = chunk_text(text, self.strategy, self.size, self.overlap)
             chunks = [
                 Chunk(f"{doc_id}:{i}", doc_id, s.text, filename, i, s.start, s.end)

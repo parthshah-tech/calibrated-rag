@@ -46,6 +46,14 @@ class RAGPipeline:
     def ingest(self, filename: str, data: bytes) -> IngestResult:
         return self.ingestor.ingest(filename, data, on_added=self.bm25.add)
 
+    def close(self) -> None:
+        if self._pool is not None:
+            self._pool.shutdown(wait=True)
+
+    def delete_document(self, doc_id: str) -> None:
+        self.store.delete_doc(doc_id)
+        self.bm25.rebuild_from(self.store.all_chunks())
+
     def _first_pass(
         self, tracer: Tracer, query: str, dense: bool, bm25: bool, label: str = "", doc_ids=None
     ):

@@ -13,6 +13,9 @@ def _int(name: str, default: int) -> int:
 @dataclass(frozen=True)
 class Settings:
     data_dir: str = "./data"
+    isolate_visitors: bool = False
+    max_upload_bytes: int = 10 * 1024 * 1024
+    max_documents: int = 50
     chunk_strategy: str = "recursive"
     chunk_size: int = 512
     chunk_overlap: int = 64
@@ -33,6 +36,8 @@ class Settings:
     llm_reasoning_effort: str | None = None  # e.g. "low" for gpt-oss models; unset otherwise
     # Study mode (see docs/study.md)
     study_mode: bool = False
+    study_flow: str = "replay"
+    study_task: str = "study/live.json"
     study_questions: str = "study/questions.json"
     study_db: str = "./data/study.sqlite"
     study_time_budget_min: int = 35
@@ -45,6 +50,9 @@ class Settings:
         e = os.environ
         return cls(
             data_dir=e.get("DATA_DIR", cls.data_dir),
+            isolate_visitors=e.get("ISOLATE_VISITORS", "0") == "1",
+            max_upload_bytes=_int("MAX_UPLOAD_BYTES", cls.max_upload_bytes),
+            max_documents=_int("MAX_DOCUMENTS", cls.max_documents),
             chunk_strategy=e.get("CHUNK_STRATEGY", cls.chunk_strategy),
             chunk_size=_int("CHUNK_SIZE", cls.chunk_size),
             chunk_overlap=_int("CHUNK_OVERLAP", cls.chunk_overlap),
@@ -63,6 +71,8 @@ class Settings:
             llm_api_key=e.get("LLM_API_KEY") or e.get("GROQ_API_KEY", ""),
             llm_reasoning_effort=e.get("LLM_REASONING_EFFORT") or None,
             study_mode=e.get("STUDY_MODE", "0") == "1",
+            study_flow=e.get("STUDY_FLOW", cls.study_flow),
+            study_task=e.get("STUDY_TASK", cls.study_task),
             study_questions=e.get("STUDY_QUESTIONS", cls.study_questions),
             study_db=e.get("STUDY_DB", cls.study_db),
             study_time_budget_min=_int("STUDY_TIME_BUDGET_MIN", cls.study_time_budget_min),

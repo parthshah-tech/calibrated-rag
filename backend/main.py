@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import re
+import secrets
+import threading
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import FastAPI, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings
@@ -17,6 +21,7 @@ from .llm import build_llm
 from .pipeline import MODES, RAGPipeline
 from .reranker import build_reranker
 from .vector_store import ChromaVectorStore
+from .workspaces import VisitorWorkspaces
 
 
 class Turn(BaseModel):
@@ -25,7 +30,7 @@ class Turn(BaseModel):
 
 
 class SearchRequest(BaseModel):
-    query: str = Field(min_length=1)
+    query: str = Field(min_length=1, max_length=4000, pattern=r"\S")
     k: int = Field(default=5, ge=1, le=50)
     mode: str = "hybrid"
     history: list[Turn] = Field(default_factory=list, max_length=20)  # used by /ask
@@ -49,10 +54,48 @@ def build_pipeline(settings: Settings | None = None) -> RAGPipeline:
 
 def create_app(pipeline: RAGPipeline | None = None, settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    app = FastAPI(title="RAG Project")
     holder: dict[str, RAGPipeline | None] = {"p": pipeline}
+    lock = threading.RLock()
+    visitors = VisitorWorkspaces(settings)
 
-    def get() -> RAGPipeline:
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        visitors.close()
+        if holder["p"] is not None:
+            holder["p"].close()
+        if hasattr(app.state, "live_store"):
+            app.state.live_store.close()
+
+    app = FastAPI(title="RAG Project", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def visitor_cookie(request: Request, call_next):
+        isolated = settings.isolate_visitors and not settings.study_mode
+        if isolated and request.method in {"POST", "DELETE", "PUT", "PATCH"}:
+            origin = request.headers.get("origin")
+            if origin and origin != str(request.base_url).rstrip("/"):
+                return JSONResponse({"detail": "Use this app from its own page."}, status_code=403)
+        token = request.cookies.get("rag_visitor", "")
+        fresh = not re.fullmatch(r"[0-9a-f]{64}", token)
+        request.state.visitor = secrets.token_hex(32) if fresh else token
+        response = await call_next(request)
+        if isolated:
+            response.headers["Cache-Control"] = "no-store"
+            if fresh:
+                response.set_cookie(
+                    "rag_visitor",
+                    request.state.visitor,
+                    httponly=True,
+                    secure=request.url.scheme == "https",
+                    samesite="lax",
+                    max_age=60 * 60 * 24 * 30,
+                )
+        return response
+
+    def get(request: Request | None = None) -> RAGPipeline:
+        if settings.isolate_visitors and not settings.study_mode:
+            return visitors.get(request.state.visitor)
         if holder["p"] is None:  # lazy so importing the app does not load models
             holder["p"] = build_pipeline(settings)
         return holder["p"]
@@ -73,20 +116,79 @@ def create_app(pipeline: RAGPipeline | None = None, settings: Settings | None = 
     @app.get("/health")
     def health():
         p = holder["p"]
-        llm = p.llm is not None if p is not None else bool(Settings.from_env().llm_api_key)
+        llm = p.llm is not None if p is not None else bool(settings.llm_api_key)
         return {"status": "ok", "llm_configured": llm}
 
+    @app.get("/app.css", include_in_schema=False)
+    def app_styles():
+        return FileResponse(Path(__file__).resolve().parent.parent / "frontend" / "app.css")
+
+    @app.get("/app-config")
+    def app_config():
+        not_in_study()
+        return {
+            "isolated": settings.isolate_visitors,
+            "max_upload_bytes": settings.max_upload_bytes,
+            "max_documents": settings.max_documents,
+        }
+
     @app.get("/documents")
-    def documents():
-        return get().store.documents()
+    def documents(request: Request):
+        not_in_study()
+        with lock:
+            return get(request).store.documents()
+
+    @app.get("/documents/{doc_id}")
+    def document(doc_id: str, request: Request):
+        from .study.viewer import reconstruct
+
+        not_in_study()
+        with lock:
+            chunks = [c for c in get(request).store.all_chunks() if c.doc_id == doc_id]
+            if not chunks:
+                raise HTTPException(404, "Document not found.")
+            return {"doc_id": doc_id, "source": chunks[0].source, "text": reconstruct(chunks)}
+
+    @app.delete("/documents/{doc_id}")
+    def delete_document(doc_id: str, request: Request):
+        not_in_study()
+        with lock:
+            p = get(request)
+            if not p.store.has_doc(doc_id):
+                raise HTTPException(404, "Document not found.")
+            p.delete_document(doc_id)
+        return {"ok": True}
 
     @app.post("/ingest")
-    async def ingest(file: UploadFile):
+    def ingest(file: UploadFile, request: Request):
         not_in_study()
-        name = file.filename or "upload"
+        name = (file.filename or "upload").replace("\\", "/").rsplit("/", 1)[-1][:255]
         if "." + name.rsplit(".", 1)[-1].lower() not in SUPPORTED:
             raise HTTPException(415, f"unsupported file type; supported: {sorted(SUPPORTED)}")
-        return asdict(get().ingest(name, await file.read()))
+        data = file.file.read(settings.max_upload_bytes + 1)
+        if len(data) > settings.max_upload_bytes:
+            raise HTTPException(413, "File exceeds the upload limit.")
+        if not data:
+            raise HTTPException(422, "This file is empty.")
+        with lock:
+            p = get(request)
+            from .ingestion import content_hash
+
+            if len(p.store.documents()) >= settings.max_documents and not p.store.has_doc(
+                content_hash(data)[:16]
+            ):
+                raise HTTPException(413, "Document limit reached. Remove a document first.")
+            try:
+                result = p.ingest(name, data)
+            except (ValueError, OSError) as exc:
+                raise HTTPException(
+                    422, "Could not read this document. Check the file format."
+                ) from exc
+            if not result.n_chunks and not result.skipped:
+                raise HTTPException(
+                    422, "No readable text found. Scanned PDFs need OCR before uploading."
+                )
+            return asdict(result)
 
     def payload(r) -> dict:
         return {
@@ -117,23 +219,31 @@ def create_app(pipeline: RAGPipeline | None = None, settings: Settings | None = 
             raise HTTPException(422, f"mode must be one of {list(MODES)}")
 
     @app.post("/search")
-    def search(req: SearchRequest):
+    def search(req: SearchRequest, request: Request):
         not_in_study()
         check_mode(req)
-        r = get().retrieve(req.query, req.k, req.mode, rerank=req.rerank, doc_ids=req.doc_ids)
-        return payload(r)
+        with lock:
+            r = get(request).retrieve(
+                req.query, req.k, req.mode, rerank=req.rerank, doc_ids=req.doc_ids
+            )
+            return payload(r)
 
     @app.post("/ask")
-    def ask(req: SearchRequest):
+    def ask(req: SearchRequest, request: Request):
         not_in_study()
         check_mode(req)
         history = [t.model_dump() for t in req.history]
-        r, ans, err = get().answer(
-            req.query, req.k, req.mode, history, req.expand, req.rerank, req.doc_ids
-        )
-        return {**payload(r), "answer": asdict(ans) if ans else None, "answer_error": err}
+        with lock:
+            r, ans, err = get(request).answer(
+                req.query, req.k, req.mode, history, req.expand, req.rerank, req.doc_ids
+            )
+            return {**payload(r), "answer": asdict(ans) if ans else None, "answer_error": err}
 
-    if settings.study_mode:
+    if settings.study_mode and settings.study_flow == "live":
+        from .study.live_api import register_live_study
+
+        register_live_study(app, settings, get, lock)
+    elif settings.study_mode:
         from .study.api import register_study
         from .study.questions import load_questions
         from .study.stimuli import build_stimuli

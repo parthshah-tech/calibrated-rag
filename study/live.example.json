@@ -1,0 +1,104 @@
+{
+  "title": "Planning an exchange semester",
+  "preview": true,
+  "info": "This study examines how people complete document-based tasks with an AI assistant. You may read the documents and choose whether to use the assistant. Allow about 40–50 minutes, including a short interview. We record your questions, assistant responses, final answers, confidence ratings, source openings and timings under a participant code. When you ask the assistant, your question and relevant document passages are sent to the configured AI service. Avoid entering personal information. Participation is voluntary. You can stop at any time and ask the researcher to remove your data using your participant code.",
+  "instructions": "First, complete a short practice item. Then work on a recommendation for Alex. You may read the documents, consult the assistant, or use both. Submit your own conclusions and rate your confidence in each. Afterwards, judge several previously generated answers and complete a questionnaire. You will receive no correctness feedback during the session.",
+  "task": "Alex wants to apply for an exchange semester. Use the supplied documents to recommend a programme, assess the budget and credit-transfer requirements, and identify what still needs confirmation.",
+  "practice": {
+    "id": "practice",
+    "prompt": "What is Alex’s current CGPA? Find the information using the documents or the assistant, then enter your answer and confidence.",
+    "answer_key": "7.2"
+  },
+  "items": [
+    {
+      "id": "eligibility",
+      "prompt": "Which programme can Alex apply to, and under what conditions?",
+      "answer_key": "Cedar with a written department recommendation; Maple minimum 8.0 is not met."
+    },
+    {
+      "id": "application",
+      "prompt": "What must Alex submit, and by when?",
+      "answer_key": "Transcript, preliminary study plan and department recommendation by 30 April."
+    },
+    {
+      "id": "budget",
+      "prompt": "After accommodation, how much of the available funds would remain if Alex receives the grant?",
+      "answer_key": "30000 + 40000 - 60000 = INR 10000."
+    },
+    {
+      "id": "funding",
+      "prompt": "Can you conclude that Alex can afford the entire semester? Explain.",
+      "answer_key": "No. Meals, travel and insurance prices are unknown and the grant depends on selection."
+    },
+    {
+      "id": "credit",
+      "prompt": "Can Alex assume that Operating Systems will transfer for credit?",
+      "answer_key": "No. Written departmental approval and comparison of syllabuses are required."
+    },
+    {
+      "id": "next_steps",
+      "prompt": "What should Alex confirm before making a final commitment?",
+      "answer_key": "Recommendation, admission/grant, additional costs, overseas syllabus and credit approval."
+    }
+  ],
+  "documents": [
+    {
+      "name": "student-profile.md",
+      "text": "Alex is applying for an exchange semester. Alex has a CGPA of 7.2 and a personal budget of INR 30,000. Alex has not requested a department recommendation. Alex needs credit transfer for Operating Systems. These are fictional review materials."
+    },
+    {
+      "name": "programme-guide.md",
+      "text": "Programme Cedar has a standard minimum CGPA of 7.5. Programme Maple requires a minimum CGPA of 8.0 and has no exceptions. Applications for both programmes close on 30 April. Include a transcript and preliminary study plan. Eligibility to apply does not guarantee admission. Selection outcomes are announced in June."
+    },
+    {
+      "name": "eligibility-amendment.md",
+      "text": "Amendment to Programme Cedar eligibility: applicants with a CGPA of at least 7.0 but below 7.5 may apply if they provide a written recommendation from their home department. The recommendation must be submitted with the application by 30 April. All other rules remain in effect. This amendment applies only to Programme Cedar."
+    },
+    {
+      "name": "funding-and-housing.md",
+      "text": "Selected Programme Cedar students receive a travel grant of INR 40,000. Accommodation costs INR 60,000 for the semester. Meals, travel tickets and insurance are additional expenses. Their prices are not specified in these documents. Do not assume that the grant will cover the entire exchange. Programme Maple offers no grant."
+    },
+    {
+      "name": "credit-transfer.md",
+      "text": "Students must obtain written approval from their home department before assuming that an overseas course will count toward their degree. The department compares the overseas syllabus against the home course. An overseas course title alone does not establish equivalence. These documents do not include the syllabus for the overseas Operating Systems course."
+    }
+  ],
+  "evaluations": [],
+  "survey": [
+    {
+      "id": "ease",
+      "text": "I found the interface easy to use."
+    },
+    {
+      "id": "effort",
+      "text": "The main task required a lot of mental effort."
+    },
+    {
+      "id": "usefulness",
+      "text": "The assistant helped me complete the task."
+    },
+    {
+      "id": "checking",
+      "text": "I felt the need to check the assistant’s answers against the documents."
+    },
+    {
+      "id": "indicator",
+      "text": "Did the assistant display a system confidence bar?",
+      "type": "choice",
+      "options": [
+        "Yes",
+        "No",
+        "Not sure",
+        "I did not use the assistant"
+      ]
+    },
+    {
+      "id": "interpretation",
+      "text": "I understood what the system confidence bar represented.",
+      "conditions": [
+        "badge"
+      ]
+    }
+  ],
+  "debrief": "Thank you for taking part. This study compares an assistant with a system confidence bar against the same assistant without that bar. We are investigating how the display affects use, verification and judgment. The bar is based on agreement between two document searches. It can be misleading, and assistant answers can contain mistakes. Your task questions were answered live. The answer-evaluation examples were prepared beforehand. Contact the researcher with your participant code if you want to request removal of your data."
+}
