@@ -18,6 +18,29 @@ Run the views together on one origin with the [shared app and Dev Tunnels guide]
 The [study guide](docs/live-study.md) explains the materials format and standalone study mode.
 The repository uses fictional examples so you can set up a study with your own material.
 
+## HCI study
+
+The study asks two questions. When people can read the source documents themselves, do they
+choose to ask a document assistant? Does seeing a confidence bar change what they verify,
+which answers they judge correctly, or how sure they feel about their judgments?
+
+The server balances assignment between two conditions. **Bar** participants see the system's
+retrieval-agreement score. **No Bar** participants use the same task, documents, and source
+links with the bar hidden. Each participant stays in one condition.
+
+1. **Main task.** After consent and a practice item, participants make a document-based decision
+   in a timed task. They can consult the assistant at any point. The study records assistant use,
+   time on task, and document and citation opens.
+2. **Answer judgments.** Both conditions see the same prepared answers and can inspect the
+   supporting passages. For each answer, participants choose **Correct**, **Incorrect**, or
+   **Unsure** and rate their confidence from 1 to 7. An answer key scores judgment accuracy
+   independently of the system's retrieval score.
+3. **Post-task feedback.** A short questionnaire and optional written responses capture
+   perceived ease, effort, and reasons for using or checking the assistant.
+
+The [study guide](docs/live-study.md) covers configuring these stages and exporting analysis
+tables. See [the original replay protocol](docs/study.md) for the earlier study mode.
+
 ## What it does
 
 - **Hybrid retrieval.** Dense search (all-MiniLM-L6-v2 embeddings in a persistent Chroma store) and
@@ -41,9 +64,6 @@ The repository uses fictional examples so you can set up a study with your own m
   same file twice does nothing. Chunking is recursive (paragraph, then sentence) or fixed-window.
 - **Per-request tracing.** Each response carries stage timings and counters (LLM calls, cache hits,
   reranker pairs).
-- **Study instrumentation.** The server records voluntary use, task timings, document and source
-  opens, judgments, and participant confidence. Password-protected exports include analysis CSVs
-  and blind grading sheets. The [original replay protocol](docs/study.md) is also available.
 - **Evaluation tooling.** A BEIR runner, ranking metrics with bootstrap confidence intervals,
   validation of the confidence signal, and a harness for your own documents and questions.
 
