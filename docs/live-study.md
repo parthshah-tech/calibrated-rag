@@ -1,8 +1,9 @@
 # Live voluntary-use study
 
 This flow supports two server-assigned conditions, baseline and confidence bar. Participants
-can complete the document task without consulting the assistant. The ordinary upload app and
-the study should run as separate processes with separate data directories.
+can complete the document task without consulting the assistant. See the [shared app guide](public-app.md)
+to host this study, the regular upload app, and its administration page together. The commands below
+run the study as a standalone process.
 
 ## Participant flow
 
@@ -12,9 +13,9 @@ the study should run as separate processes with separate data directories.
 3. Main task, with a server-timed budget. The task brief, questions, answer fields and confidence
    ratings are on the same page as the optional assistant. Drafts save after a brief pause in typing.
 4. Shared answer judgments, if evaluation examples are configured. Each participant sees the
-   same previously generated answers. Only the confidence condition receives their scores.
-5. Questionnaire, with skip/not-applicable responses allowed.
-6. Interview handoff, followed by a participant-controlled debrief.
+   same prepared answers. Only the confidence condition receives their scores.
+5. Questionnaire and optional written responses.
+6. Participant-controlled debrief.
 
 Reloading restores the assigned condition, phase, transcript, saved draft and remaining time.
 The cookie identifies this browser session. Switching browsers or clearing cookies creates a

@@ -42,6 +42,7 @@ class Ask(Identified):
 class Answer(Input):
     text: str = Field(default="", max_length=4000)
     confidence: int | None = Field(default=None, ge=1, le=7, strict=True)
+    choice: str | None = Field(default=None, max_length=200)
 
 
 class Draft(Input):
@@ -225,19 +226,24 @@ def register_live_study(app, settings, get_pipeline, lock):
         )
 
     def validate_answers(phase, answers, complete):
-        expected = (
-            {materials.practice.id} if phase == "practice" else {i.id for i in materials.items}
-        )
-        if set(answers) - expected:
+        items = [materials.practice] if phase == "practice" else materials.items
+        expected = {item.id: item for item in items}
+        if answers.keys() - expected.keys():
             raise HTTPException(422, "Unknown answer field.")
-        if complete and (
-            set(answers) != expected
-            or any(
-                not answer.text.strip() or answer.confidence is None for answer in answers.values()
-            )
-        ):
-            raise HTTPException(422, "Answer each item and give a confidence rating.")
-        return {key: answer.model_dump() for key, answer in answers.items()}
+        if complete and answers.keys() != expected.keys():
+            raise HTTPException(422, "Answer each item before continuing.")
+        for key, answer in answers.items():
+            choices = expected[key].choices
+            if answer.choice is not None and (not choices or answer.choice not in choices):
+                raise HTTPException(422, "Choose an option from the list.")
+            if complete and choices and (answer.choice is None or not answer.text.strip()):
+                raise HTTPException(422, "Choose an option and explain your reasons.")
+            if complete and not choices and (not answer.text.strip() or answer.confidence is None):
+                raise HTTPException(422, "Answer each item and give a confidence rating.")
+        return {
+            key: answer.model_dump(exclude={"choice"} if answer.choice is None else set())
+            for key, answer in answers.items()
+        }
 
     @app.get("/study", include_in_schema=False)
     def study_page():
@@ -363,12 +369,15 @@ def register_live_study(app, settings, get_pipeline, lock):
                         422, "Respond to each survey item, or choose Prefer not to answer."
                     )
                 for key, value in req.survey.items():
+                    if value is None:
+                        continue
                     item = expected[key]
-                    valid = value is None or (
-                        type(value) is int and 1 <= value <= 7
-                        if item.type == "scale"
-                        else value in item.options
-                    )
+                    if item.type == "scale":
+                        valid = type(value) is int and 1 <= value <= 7
+                    elif item.type == "text":
+                        valid = isinstance(value, str) and 0 < len(value.strip()) <= 1000
+                    else:
+                        valid = value in item.options
                     if not valid:
                         raise HTTPException(422, "Invalid survey response.")
                 payload["survey"] = req.survey

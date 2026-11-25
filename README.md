@@ -2,17 +2,21 @@
 
 [![ci](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/parthshah-tech/calibrated-rag/actions/workflows/ci.yml)
 
-A document question-answering app that tells you how much to trust its retrieval. It searches your
-documents with two methods at once (embedding search and BM25 keyword search), merges them, and
-writes a cited answer. The two searches rarely agree when a question is poorly covered, so the app
-turns their **agreement into a Low / Medium / High confidence badge**. The badge is tested against
-public benchmarks, and the results are below.
+A document question-answering app that combines semantic search with BM25 keyword search and writes
+cited answers. The confidence bar reflects how closely the two searches rank the same passages.
+It measures retrieval agreement. The score is computed before the answer is written.
 
-It started as a personal project and became the system behind a group study in a Human-Computer
-Interaction course (BITS F364) on whether such a signal helps people trust answers appropriately.
-This repository contains the system, its evaluation, and the software to run the study
-(consent, conditions, saved stimuli, event log, export, grading sheets). It contains no study
-data and no study questions.
+## Application views
+
+| View | Route | What it does |
+|---|---|---|
+| Document chat | `/` | Upload documents, ask questions, and open cited passages. Shared hosting keeps each browser's documents separate. |
+| Participant study | `/study` | Consent, practice, a timed task with optional assistant use, prepared answer judgments, a questionnaire, and debrief. The server assigns each participant to Bar or No Bar. |
+| Study administration | `/study/admin` | Sign in, manage the scenario, documents and questions, publish a version for new participants, and export data by study version. |
+
+Run the views together on one origin with the [shared app and Dev Tunnels guide](docs/public-app.md).
+The [study guide](docs/live-study.md) explains the materials format and standalone study mode.
+The repository uses fictional examples so you can set up a study with your own material.
 
 ## What it does
 
@@ -20,7 +24,7 @@ data and no study questions.
   BM25 (`rank_bm25`), fused with Reciprocal Rank Fusion. Dense-only and keywords-only modes are
   also available.
 - **Confidence signal.** Rank-biased overlap (RBO) of the top 10 of each search, computed before
-  fusion, shown as a badge. Top-k overlap and a Kendall-tau-based score are available through
+  fusion and displayed as a continuous bar. Top-k overlap and a Kendall-tau-based score are available through
   `CONFIDENCE_METRIC`.
 - **Cited answers.** An LLM (any OpenAI-compatible endpoint, Groq by default) answers from the
   retrieved passages only and cites them as `[1]`, `[2]`. If the passages don't contain the answer
@@ -37,13 +41,9 @@ data and no study questions.
   same file twice does nothing. Chunking is recursive (paragraph, then sentence) or fixed-window.
 - **Per-request tracing.** Each response carries stage timings and counters (LLM calls, cache hits,
   reranker pairs).
-- **Study mode.** A closed experiment flow: consent, instructions, a practice item, questions in
-  a random order per participant, accept-or-override answers with a 1-to-7 confidence rating, a
-  document viewer, a questionnaire and a debrief. Three conditions (no badge, badge, badge plus
-  suggested rewordings) are assigned by the server and enforced in its responses. Answers are
-  saved once and replayed, so the study server needs no models or API key. An append-only log,
-  blind grading sheets and an anonymising export complete it. See [`docs/study.md`](docs/study.md),
-  [`docs/analysis_plan.md`](docs/analysis_plan.md) and [`docs/deploy.md`](docs/deploy.md).
+- **Study instrumentation.** The server records voluntary use, task timings, document and source
+  opens, judgments, and participant confidence. Password-protected exports include analysis CSVs
+  and blind grading sheets. The [original replay protocol](docs/study.md) is also available.
 - **Evaluation tooling.** A BEIR runner, ranking metrics with bootstrap confidence intervals,
   validation of the confidence signal, and a harness for your own documents and questions.
 
@@ -80,7 +80,8 @@ Set in `.env` (see `.env.example`).
 | `CONFIDENCE_METRIC` / `CONFIDENCE_K` | `rbo` / `10` | `overlap`, `rbo` or `tau`; list depth compared. |
 | `CANDIDATE_POOL` / `RRF_K` | `50` / `60` | Candidates per retriever; RRF constant. |
 | `CONFIDENCE_LOW` / `CONFIDENCE_HIGH` | `0.3` / `0.6` | Badge cutoffs. Fit them on your own documents (`eval.fit_cutoffs`). |
-| `STUDY_MODE`, `STUDY_QUESTIONS`, `STUDY_FROZEN`, `STUDY_DB`, `STUDY_TIME_BUDGET_MIN`, `STUDY_ADMIN_TOKEN`, `STUDY_SALT` | off, see `docs/study.md` | Study mode. |
+| `STUDY_MODE`, `STUDY_FLOW`, `STUDY_TASK`, `STUDY_DB`, `STUDY_TIME_BUDGET_MIN`, `STUDY_SALT` | see [study guide](docs/live-study.md) | Standalone study settings. |
+| `PUBLIC_RAG_DATA_DIR`, `PUBLIC_ADMIN_USERNAME`, `PUBLIC_ADMIN_PASSWORD`, `PUBLIC_ORIGIN` | see [shared app guide](docs/public-app.md) | Settings for serving all three views together. |
 | `RERANK_MODEL` / `RERANK_POOL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` / `20` | Reranker and how many candidates it re-scores. |
 
 Answer text and passages are sent to the configured LLM provider when an answer is written.
@@ -95,7 +96,8 @@ Answer text and passages are sent to the configured LLM provider when an answer 
 | `POST /ingest` | Upload a file (multipart `file`). |
 | `POST /search` | Retrieval only: `query`, `k`, `mode`, `rerank`, `doc_ids`. |
 | `POST /ask` | Retrieval plus a cited answer. Also takes `history`, `expand` (0 to 5 extra queries). |
-| `/study`, `/study/*` | Study mode only: participant page, session start, ask, events, documents, token-protected data downloads. The endpoints above are closed in study mode. |
+| `/study`, `/study/*` | Study participant pages and session routes. |
+| `/study/admin` | Protected materials editor and data exports. |
 
 Responses include `results`, `confidence`, `trace`, and for `/ask` an `answer` (text, cited
 passage numbers, model, whether it was cached, whether the model said the documents don't answer),

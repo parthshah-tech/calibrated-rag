@@ -15,8 +15,10 @@ let expirySubmitted = false;
 let lastDraft = Promise.resolve();
 
 async function api(path, body, keepalive = false) {
+  const headers = {'Content-Type': 'application/json'};
+  if (path === '/session' && information?.version) headers['X-Study-Version'] = information.version;
   const response = await fetch('/study' + path, body === undefined ? {} : {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
+    method: 'POST', headers,
     body: JSON.stringify(body), keepalive,
   });
   if (!response.ok) {
@@ -24,6 +26,7 @@ async function api(path, body, keepalive = false) {
     throw new Error(typeof error?.detail === 'string' ? error.detail : 'This request could not be completed. Try again.');
   }
   const data = await response.json();
+  if (path === '/info') data.version = response.headers.get('X-Study-Version');
   return data;
 }
 
@@ -71,6 +74,14 @@ function responseFields() {
   const items = state.phase === 'practice' ? [state.practice] : state.items;
   return items.map(item => {
     const draft = state.draft[item.id] || {};
+    if (item.choices?.length) {
+      return `<fieldset><label class="response-label" for="choice-${item.id}">${esc(item.prompt)}</label>
+        <select class="response-choice" id="choice-${item.id}" required><option value="">Choose an option</option>${item.choices.map(choice =>
+          `<option value="${esc(choice)}" ${draft.choice === choice ? 'selected' : ''}>${esc(choice)}</option>`).join('')}</select>
+        <label class="response-label" for="answer-${item.id}">Explain your choice using the documents. If you need more information, say what you would check.</label>
+        <textarea class="response-text" id="answer-${item.id}" data-answer="${item.id}" maxlength="4000" required>${esc(draft.text || '')}</textarea>
+        <div role="group" aria-label="Confidence in your recommendation"><p class="rating-caption">How confident are you in your recommendation? (Optional)</p>${ratings('confidence-' + item.id, draft.confidence)}</div></fieldset>`;
+    }
     return `<fieldset><label class="response-label" for="answer-${item.id}">${esc(item.prompt)}</label>
       <textarea class="response-text" id="answer-${item.id}" data-answer="${item.id}" maxlength="4000">${esc(draft.text || '')}</textarea>
       <div role="group" aria-label="Confidence in your response"><p class="rating-caption">How confident are you that your response is correct?</p>${ratings('confidence-' + item.id, draft.confidence)}</div></fieldset>`;
@@ -83,8 +94,20 @@ function collectAnswers() {
     const id = field.dataset.answer;
     const checked = $('response-fields').querySelector(`input[name="confidence-${id}"]:checked`);
     answers[id] = {text: field.value, confidence: checked ? Number(checked.value) : null};
+    const choice = $('choice-' + id);
+    if (choice) answers[id].choice = choice.value || null;
   });
   return answers;
+}
+
+function surveyInput(item) {
+  const name = 'survey-' + item.id;
+  if (item.type === 'scale') return ratings(name, null, item.low, item.high);
+  if (item.type === 'text') {
+    return `<textarea class="response-text" name="${name}" maxlength="1000" aria-label="${esc(item.text)}" placeholder="Optional"></textarea>`;
+  }
+  return `<select name="${name}"><option value="">Choose a response</option>${item.options.map(option =>
+    `<option value="${esc(option)}">${esc(option)}</option>`).join('')}</select>`;
 }
 
 function adopt(next) {
@@ -134,9 +157,15 @@ function render() {
       <form id="judgment-form"><fieldset><legend>Is the assistant’s answer correct?</legend><div class="rating">${['correct', 'incorrect', 'unsure'].map(value => `<label><input type="radio" name="judgment" value="${value}" required>${value === 'unsure' ? 'Unsure' : value[0].toUpperCase() + value.slice(1)}</label>`).join('')}</div></fieldset>
       <fieldset><legend>How confident are you in that judgment?</legend>${ratings('judgment-confidence', null)}</fieldset><button class="button primary">Continue</button></form></section>`;
   } else if (phase === 'survey') {
-    screen.innerHTML = `<section class="stage"><h1>Your experience</h1><p>Think about the main task. You may skip any item or choose Not applicable.</p><form id="survey-form">${state.survey.map(item => `<fieldset><legend>${esc(item.text)}</legend>${item.type === 'scale' ? ratings('survey-' + item.id, null, item.low, item.high) : `<select name="survey-${item.id}"><option value="">Choose a response</option>${item.options.map(option => `<option value="${esc(option)}">${esc(option)}</option>`).join('')}</select>`}<label class="hint"><input type="checkbox" name="skip-${item.id}"> Not applicable / Prefer not to answer</label></fieldset>`).join('')}<button class="button primary">Finish questionnaire</button></form></section>`;
+    const questions = state.survey.filter(item => item.type !== 'text');
+    const written = state.survey.filter(item => item.type === 'text');
+    screen.innerHTML = `<section class="stage"><h1>Your experience</h1><p>You may skip any item. Please leave out names or other identifying details.</p><form id="survey-form">
+      ${questions.map(item => `<fieldset><legend>${esc(item.text)}</legend>${surveyInput(item)}<label class="hint"><input type="checkbox" name="skip-${item.id}"> Not applicable / Prefer not to answer</label></fieldset>`).join('')}
+      ${written.length ? `<section aria-labelledby="written-title"><h2 id="written-title">Written interview</h2><p>Short examples in your own words are enough. You can leave any question blank.</p>
+        ${written.map(item => `<fieldset><legend>${esc(item.text)}</legend>${surveyInput(item)}</fieldset>`).join('')}</section>` : ''}
+      <button class="button primary">Save and continue</button></form></section>`;
   } else if (phase === 'interview') {
-    screen.innerHTML = `<section class="stage"><h1>Ready for your interview</h1><p>Your responses have been saved. Please let the researcher know you are ready for the short interview.</p><p>Participant code <strong>${esc(state.participant_id)}</strong></p><button class="button primary" id="debrief">After the interview, view the study explanation</button></section>`;
+    screen.innerHTML = `<section class="stage"><h1>Your responses are saved</h1><p>Participant code <strong>${esc(state.participant_id)}</strong></p><button class="button primary" id="debrief">View the study explanation</button></section>`;
   } else {
     screen.innerHTML = `<section class="stage"><h1>${phase === 'withdrawn' ? 'Your session has stopped' : 'Thank you for taking part'}</h1><p>${phase === 'withdrawn' ? 'Your session is marked as withdrawn and will be excluded from analysis. Give your participant code to the researcher if you also want to request deletion of the stored records.' : esc(state.debrief)}</p><p>Participant code <strong>${esc(state.participant_id)}</strong></p></section>`;
   }
@@ -192,7 +221,7 @@ document.addEventListener('submit', event => {
       const data = formData;
       const values = {};
       state.survey.forEach(item => {
-        const value = data.get('survey-' + item.id);
+        const value = data.get('survey-' + item.id)?.trim();
         values[item.id] = data.has('skip-' + item.id) || !value ? null : item.type === 'scale' ? Number(value) : value;
       });
       await submitPhase({survey: values});

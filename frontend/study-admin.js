@@ -1,13 +1,16 @@
 const $ = id => document.getElementById(id);
 const fields = ['title', 'task', 'info', 'instructions', 'debrief'];
+const publishedMode = document.body.dataset.adminMode === 'published';
 let token;
 let saved;
 let busy = false;
 let dirty = false;
 
 async function request(path, options = {}, format = 'json') {
+  const headers = {...options.headers};
+  if (token) headers['X-Admin-Token'] = token;
   const response = await fetch(`/study/admin/${path}`, {
-    ...options, headers: {...options.headers, 'X-Admin-Token': token},
+    ...options, headers,
   });
   if (!response.ok) {
     const data = await response.json().catch(() => null);
@@ -16,6 +19,16 @@ async function request(path, options = {}, format = 'json') {
     throw new Error(detail || 'The study setup request failed. Try again.');
   }
   return format === 'blob' ? response.blob() : response.json();
+}
+
+async function loadVersions() {
+  const select = $('export-run');
+  const {runs} = await request('runs');
+  select.replaceChildren(...runs.map(run => new Option(
+    `Version ${run.id} · ${run.title}${run.preview ? ' · Preview' : ''}`,
+    run.id, false, run.current,
+  )));
+  $('export').disabled = !runs.length;
 }
 
 function downloadFile(blob, filename) {
@@ -91,6 +104,7 @@ function currentEdit() {
   const items = Array.from($('questions').children, group => ({
     id: group.dataset.id, prompt: value(group.querySelector('.prompt')),
     answer_key: value(group.querySelector('.answer-key')),
+    choices: saved.materials.items.find(item => item.id === group.dataset.id)?.choices || null,
   }));
   const documents = Array.from($('documents').children, group => ({
     name: value(group.querySelector('.doc-name')), text: group.querySelector('.doc-text').value,
@@ -98,7 +112,7 @@ function currentEdit() {
   if (!items.length || !documents.length) throw new Error('Add at least one task question and one document.');
   return {
     revision: saved.revision, ...Object.fromEntries(fields.map(key => [key, value($(key))])),
-    practice: {id: saved.materials.practice.id, prompt: value($('practice-prompt')), answer_key: value($('practice-key'))},
+    practice: {...saved.materials.practice, prompt: value($('practice-prompt')), answer_key: value($('practice-key'))},
     items, documents,
   };
 }
@@ -200,13 +214,22 @@ $('files').addEventListener('change', () => {
 $('editor').addEventListener('submit', event => {
   event.preventDefault();
   editAction(async () => {
-    status('Saving draft…');
+    status(publishedMode ? 'Saving changes…' : 'Saving draft…');
     const result = await request('materials', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(currentEdit()),
     });
     render(result);
-    status(result.evaluation_reset ? 'Draft saved. Prepare new shared answer examples before the study.' : 'Draft saved for the next run');
+    if (publishedMode) {
+      await loadVersions();
+      status(result.evaluation_reset
+        ? 'New preview published. Prepare new shared answers before collecting data.'
+        : 'Changes are live for new participants.');
+    } else {
+      status(result.evaluation_reset
+        ? 'Draft saved. Prepare new shared answer examples before the study.'
+        : 'Draft saved for the next run.');
+    }
   });
 });
 
@@ -220,11 +243,28 @@ $('export').addEventListener('click', () => {
     const message = $('export-status');
     message.textContent = 'Preparing your download…';
     try {
-      const archive = await request('export.zip', {}, 'blob');
-      downloadFile(archive, 'live-study-export.zip');
+      const version = publishedMode ? $('export-run').value : '';
+      const archive = await request(version ? `export.zip?run=${version}` : 'export.zip', {}, 'blob');
+      downloadFile(archive, version ? `live-study-version-${version}.zip` : 'live-study-export.zip');
       message.textContent = 'Export downloaded.';
     } catch (error) {
       message.textContent = error.message;
     }
   });
 });
+
+if (publishedMode) {
+  $('unlock').hidden = true;
+  $('setup-description').textContent = 'Saved changes apply to new participants. Existing sessions keep their version.';
+  $('editor').querySelector('button[type=submit]').textContent = 'Save changes';
+  $('download').textContent = 'Download study setup';
+  $('export-versions').hidden = false;
+  $('export').disabled = true;
+  request('materials').then(result => {
+    render(result);
+    $('editor').hidden = false;
+    return loadVersions();
+  }).catch(error => {
+    $('setup-description').textContent = error.message;
+  });
+}

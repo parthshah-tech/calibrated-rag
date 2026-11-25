@@ -25,6 +25,7 @@ class TaskItem(Material):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
     prompt: str = Field(min_length=1)
     answer_key: str = ""
+    choices: list[str] | None = Field(default=None, min_length=2)
 
 
 class Evaluation(Material):
@@ -40,7 +41,7 @@ class Evaluation(Material):
 class SurveyItem(Material):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]+$")
     text: str = Field(min_length=1)
-    type: Literal["scale", "choice"] = "scale"
+    type: Literal["scale", "choice", "text"] = "scale"
     options: list[str] = Field(default_factory=list)
     low: str = "Strongly disagree"
     high: str = "Strongly agree"
@@ -99,9 +100,13 @@ def config_hash(materials, settings):
         "llm_reasoning_effort",
         "study_time_budget_min",
     )
+    material_data = materials.model_dump()
+    for item in [material_data["practice"], *material_data["items"]]:
+        if item["choices"] is None:
+            del item["choices"]  # Keep fingerprints for existing written-answer sessions.
     value = {
         "flow": "voluntary-live-v1",
-        "materials": materials.model_dump(),
+        "materials": material_data,
         "settings": {key: getattr(settings, key) for key in names},
         "prompt": SYSTEM_PROMPT,
         "retrieval": {"k": 5, "mode": "hybrid", "history_turns": 6},

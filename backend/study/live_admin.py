@@ -31,6 +31,40 @@ def revision(materials):
     return sha256(materials.model_dump_json().encode()).hexdigest()
 
 
+def edit_materials(edit: DraftUpdate, previous: LiveMaterials, *, draft: bool):
+    if edit.revision != revision(previous):
+        raise HTTPException(409, "Another edit was saved. Reopen the editor before saving.")
+    changes = edit.model_dump(exclude={"revision"})
+    before = previous.model_dump()
+    evidence_fields = ("task", "practice", "items", "documents")
+    reset_fields = ("title", *evidence_fields) if draft else evidence_fields
+    reset = any(changes[key] != before[key] for key in reset_fields)
+    data = {**before, **changes, "preview": draft or previous.preview or reset}
+    if reset:
+        data["evaluations"] = []
+    if any(not doc.text.strip() for doc in edit.documents):
+        raise HTTPException(422, "Each document needs readable text.")
+    try:
+        materials = LiveMaterials.model_validate(data)
+    except ValidationError as error:
+        messages = [
+            " ".join([*(str(part) for part in item["loc"]), item["msg"]]) for item in error.errors()
+        ]
+        raise HTTPException(422, "; ".join(messages)) from error
+    return materials, reset and bool(previous.evaluations)
+
+
+def write_atomic(path: Path, contents: str):
+    with NamedTemporaryFile(dir=path.parent, encoding="utf-8", mode="w", delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(contents)
+            output.close()
+            temporary.replace(path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 def register_admin(app, settings, active, frontend):
     path = Path(settings.study_db).with_name(Path(settings.study_db).name + ".draft.json")
     lock = Lock()
@@ -62,42 +96,13 @@ def register_admin(app, settings, active, frontend):
     @app.post("/study/admin/materials", dependencies=[Depends(authorize)], include_in_schema=False)
     def save_draft(edit: DraftUpdate):
         with lock:
-            previous = current()
-            if edit.revision != revision(previous):
-                raise HTTPException(409, "Another edit was saved. Reopen the editor before saving.")
-            changes = edit.model_dump(exclude={"revision"})
-            before = previous.model_dump()
-            reset = any(
-                changes[key] != before[key]
-                for key in ("title", "task", "practice", "items", "documents")
-            )
-            data = {**before, **changes, "preview": True}
-            if reset:
-                data["evaluations"] = []
-            if any(not doc.text.strip() for doc in edit.documents):
-                raise HTTPException(422, "Each document needs readable text.")
-            try:
-                materials = LiveMaterials.model_validate(data)
-            except ValidationError as error:
-                messages = [
-                    " ".join([*(str(part) for part in item["loc"]), item["msg"]])
-                    for item in error.errors()
-                ]
-                raise HTTPException(422, "; ".join(messages)) from error
-            with NamedTemporaryFile(
-                dir=path.parent, encoding="utf-8", mode="w", delete=False
-            ) as output:
-                temporary = Path(output.name)
-                output.write(materials.model_dump_json(indent=2))
-            try:
-                temporary.replace(path)
-            finally:
-                temporary.unlink(missing_ok=True)
+            materials, reset = edit_materials(edit, current(), draft=True)
+            write_atomic(path, materials.model_dump_json(indent=2))
             return {
                 "revision": revision(materials),
                 "materials": materials,
                 "saved": True,
-                "evaluation_reset": reset and bool(previous.evaluations),
+                "evaluation_reset": reset,
             }
 
     @app.post("/study/admin/extract", dependencies=[Depends(authorize)], include_in_schema=False)

@@ -34,7 +34,7 @@
   <header class="header"><div class="brand"><span class="brand-mark" aria-hidden="true"></span>calibrated</div></header>
   <main class="setup">
     <h1>Study setup</h1>
-    <p>Prepare the scenario, questions and shared documents for your next study run.</p>
+    <p id="setup-description">Prepare the scenario, questions and shared documents for your next study run.</p>
     <form id="unlock" class="setup-panel">
       <label>Administrator token<input id="token" type="password" autocomplete="off" required></label>
       <button class="button primary">Open editor</button>
@@ -43,7 +43,8 @@
     <form id="editor" hidden>
       <section class="setup-panel" aria-labelledby="data-title">
         <div class="setup-row"><h2 id="data-title">Study data</h2><button class="button" id="export" type="button">Download participant data</button></div>
-        <p>Download a ZIP with responses, confidence ratings, questionnaire results and activity logs for the current run.</p>
+        <p>Download a ZIP with responses, confidence ratings, questionnaire results and activity logs.</p>
+        <label id="export-versions" hidden>Study version <select id="export-run"></select></label>
         <div id="export-status" role="status"></div>
       </section>
       <section class="setup-panel">

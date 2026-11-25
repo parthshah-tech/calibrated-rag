@@ -7,6 +7,7 @@ import hmac
 import io
 import json
 import zipfile
+from collections import Counter
 from typing import Annotated
 
 from fastapi import Header, HTTPException
@@ -17,8 +18,12 @@ from .export import participant_id, to_csv
 
 def build_archive(store, materials, salt, fingerprint):
     sessions, responses, human, ai, links, judgments, surveys, raw = [], [], [], [], [], [], [], []
+    analysis_participants, analysis_judgments, qualitative_responses = [], [], []
     known_ai = set()
     rubric = {item.id: item for item in [materials.practice, *materials.items]}
+    decision = next((item for item in materials.items if item.choices), None)
+    evaluation_numbers = {item.id: number for number, item in enumerate(materials.evaluations, 1)}
+    written_prompts = {item.id: item.text for item in materials.survey if item.type == "text"}
     for person in store.participants():
         pid = participant_id(person["code"], salt, False)
         ev = store.events(person["code"])
@@ -34,10 +39,15 @@ def build_archive(store, materials, salt, fingerprint):
         opens = [
             e for e in ev if e["type"] == "live_view_opened" and e["payload"]["phase"] == "task"
         ]
+        documented_opens = sum(e["payload"]["kind"] == "document" for e in opens)
+        cited_opens = sum(e["payload"]["kind"] == "citation" for e in opens)
+        participant_code = "P-" + person["code"][:8]
+        elapsed = main_end["ts"] - main_start if main_end and main_start else None
+        condition_label = "Bar" if person["condition"] == "badge" else "No bar"
         sessions.append(
             {
                 "participant_id": pid,
-                "participant_code": "P-" + person["code"][:8],
+                "participant_code": participant_code,
                 "condition": person["condition"],
                 "config_hash": fingerprint,
                 "preview": materials.preview,
@@ -46,16 +56,48 @@ def build_archive(store, materials, salt, fingerprint):
                 "completed": phase == "complete",
                 "task_started_at": main_start,
                 "task_submitted_at": main_end["ts"] if main_end else None,
-                "task_seconds": main_end["ts"] - main_start if main_end and main_start else None,
+                "task_seconds": elapsed,
                 "expired": main_end["payload"].get("expired") if main_end else None,
                 "n_main_queries": len(main_asks),
-                "n_document_opens": sum(e["payload"]["kind"] == "document" for e in opens),
-                "n_citation_opens": sum(e["payload"]["kind"] == "citation" for e in opens),
+                "n_document_opens": documented_opens,
+                "n_citation_opens": cited_opens,
                 "seconds_to_first_query": main_asks[0]["ts"] - main_start
                 if main_asks and main_start
                 else None,
             }
         )
+        include_in_analysis = (
+            decision is not None and not materials.preview and phase != "withdrawn"
+        )
+        evaluation_opens = Counter()
+        if include_in_analysis:
+            decision_response = (
+                main_end["payload"]["answers"].get(decision.id, {}) if main_end else {}
+            )
+            analysis_participants.append(
+                {
+                    "participant_id": pid,
+                    "participant_code": participant_code,
+                    "condition": condition_label,
+                    "main_task_started": main_start is not None,
+                    "main_task_submitted": main_end is not None,
+                    "main_task_timed_out": main_end["payload"].get("expired") if main_end else None,
+                    "study_completed": phase == "complete",
+                    "college_choice": decision_response.get("choice"),
+                    "written_reasons": decision_response.get("text"),
+                    "recommendation_confidence": decision_response.get("confidence"),
+                    "main_task_minutes": round(elapsed / 60, 3) if elapsed is not None else None,
+                    "assistant_questions": len(main_asks),
+                    "source_opens": documented_opens + cited_opens,
+                    "document_opens": documented_opens,
+                    "citation_opens": cited_opens,
+                }
+            )
+            evaluation_opens.update(
+                e["payload"]["target"]
+                for e in ev
+                if e["type"] == "live_view_opened" and e["payload"]["kind"] == "evaluation"
+            )
         for event in ev:
             payload = event["payload"]
             raw.append(
@@ -84,6 +126,7 @@ def build_archive(store, materials, salt, fingerprint):
                             "item_id": qid,
                             "prompt": rubric[qid].prompt,
                             "answer_key": rubric[qid].answer_key,
+                            "choice": answer.get("choice"),
                             "answer": answer["text"],
                             "grader1": "",
                             "grader2": "",
@@ -139,6 +182,25 @@ def build_archive(store, materials, salt, fingerprint):
                         "withdrawn": phase == "withdrawn",
                     }
                 )
+                if include_in_analysis:
+                    analysis_judgments.append(
+                        {
+                            "participant_id": pid,
+                            "participant_code": participant_code,
+                            "condition": condition_label,
+                            "item_number": evaluation_numbers[item.id],
+                            "item_id": item.id,
+                            "ground_truth": ("Correct" if item.ai_correct else "Incorrect")
+                            if item.ai_correct is not None
+                            else None,
+                            "displayed_confidence": item.score
+                            if condition_label == "Bar"
+                            else None,
+                            "judgment": payload["judgment"].capitalize(),
+                            "judgment_confidence": payload["confidence"],
+                            "source_opens": evaluation_opens[item.id],
+                        }
+                    )
             if event["type"] == "live_phase" and "survey" in payload:
                 for item, value in payload["survey"].items():
                     surveys.append(
@@ -150,6 +212,17 @@ def build_archive(store, materials, salt, fingerprint):
                             "withdrawn": phase == "withdrawn",
                         }
                     )
+                    if include_in_analysis and item in written_prompts and value:
+                        qualitative_responses.append(
+                            {
+                                "participant_id": pid,
+                                "participant_code": participant_code,
+                                "condition": condition_label,
+                                "item_id": item,
+                                "prompt": written_prompts[item],
+                                "response": value,
+                            }
+                        )
 
     sheets = {
         "sessions.csv": (
@@ -182,6 +255,7 @@ def build_archive(store, materials, salt, fingerprint):
                 "phase",
                 "item_id",
                 "text",
+                "choice",
                 "confidence",
                 "withdrawn",
             ],
@@ -193,6 +267,7 @@ def build_archive(store, materials, salt, fingerprint):
                 "item_id",
                 "prompt",
                 "answer_key",
+                "choice",
                 "answer",
                 "grader1",
                 "grader2",
@@ -231,6 +306,57 @@ def build_archive(store, materials, salt, fingerprint):
         ),
         "survey.csv": (surveys, ["participant_id", "condition", "item_id", "value", "withdrawn"]),
     }
+    if decision is not None:
+        sheets.update(
+            {
+                "analysis_participants.csv": (
+                    analysis_participants,
+                    [
+                        "participant_id",
+                        "participant_code",
+                        "condition",
+                        "main_task_started",
+                        "main_task_submitted",
+                        "main_task_timed_out",
+                        "study_completed",
+                        "college_choice",
+                        "written_reasons",
+                        "recommendation_confidence",
+                        "main_task_minutes",
+                        "assistant_questions",
+                        "source_opens",
+                        "document_opens",
+                        "citation_opens",
+                    ],
+                ),
+                "analysis_judgments.csv": (
+                    analysis_judgments,
+                    [
+                        "participant_id",
+                        "participant_code",
+                        "condition",
+                        "item_number",
+                        "item_id",
+                        "ground_truth",
+                        "displayed_confidence",
+                        "judgment",
+                        "judgment_confidence",
+                        "source_opens",
+                    ],
+                ),
+                "qualitative_responses.csv": (
+                    qualitative_responses,
+                    [
+                        "participant_id",
+                        "participant_code",
+                        "condition",
+                        "item_id",
+                        "prompt",
+                        "response",
+                    ],
+                ),
+            }
+        )
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
         for name, (rows, columns) in sheets.items():
@@ -251,6 +377,9 @@ def build_archive(store, materials, salt, fingerprint):
             (
                 "Live voluntary-use study export\n"
                 "Exclude preview sessions and withdrawn sessions from research analysis.\n"
+                "analysis_participants.csv, analysis_judgments.csv and qualitative_responses.csv "
+                "already exclude those sessions.\n"
+                "Join interview notes by participant_code and survey.csv by participant_id.\n"
                 "Practice is identified by phase and must be kept separate from the main task.\n"
                 "Use the blind grading sheets to assess correctness and reliance.\n"
                 "task_answers links blind sheet IDs to participants.\n"
